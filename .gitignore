@@ -42,3 +42,7 @@ bld/
 # Logs
 logs/
 *.log
+
+# Windows reserved names
+nul
+NUL
