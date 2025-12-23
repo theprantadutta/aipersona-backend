@@ -1,0 +1,306 @@
+using System.Net.Http.Json;
+using System.Runtime.CompilerServices;
+using System.Text;
+using System.Text.Json;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using AiPersona.Application.Common.Interfaces;
+using AiPersona.Domain.Entities;
+using AiPersona.Domain.Enums;
+
+namespace AiPersona.Infrastructure.Services;
+
+public class GeminiService : IGeminiService
+{
+    private readonly HttpClient _httpClient;
+    private readonly ILogger<GeminiService> _logger;
+    private readonly string _apiKey;
+    private readonly string _model;
+    private readonly int _maxTokens;
+    private readonly double _temperature;
+    private readonly int _maxConversationHistory;
+
+    // Fallback to Freeway API
+    private readonly string? _freewayApiUrl;
+    private readonly string? _freewayApiKey;
+    private readonly string? _freewayModel;
+
+    public GeminiService(HttpClient httpClient, IConfiguration configuration, ILogger<GeminiService> logger)
+    {
+        _httpClient = httpClient;
+        _logger = logger;
+
+        _apiKey = configuration["Gemini:ApiKey"]
+            ?? Environment.GetEnvironmentVariable("GEMINI_API_KEY")
+            ?? throw new InvalidOperationException("Gemini API key is not configured");
+
+        _model = configuration["Gemini:Model"]
+            ?? Environment.GetEnvironmentVariable("GEMINI_MODEL")
+            ?? "gemini-2.0-flash-exp";
+
+        _maxTokens = int.Parse(configuration["AiDefaults:MaxTokens"] ?? "8192");
+        _temperature = double.Parse(configuration["AiDefaults:Temperature"] ?? "0.7");
+        _maxConversationHistory = int.Parse(configuration["AiDefaults:MaxConversationHistory"] ?? "20");
+
+        // Freeway fallback
+        _freewayApiUrl = configuration["Freeway:ApiUrl"] ?? Environment.GetEnvironmentVariable("FREEWAY_API_URL");
+        _freewayApiKey = configuration["Freeway:ApiKey"] ?? Environment.GetEnvironmentVariable("FREEWAY_API_KEY");
+        _freewayModel = configuration["Freeway:Model"] ?? Environment.GetEnvironmentVariable("FREEWAY_MODEL");
+    }
+
+    public async Task<GeminiResponse> GenerateResponseAsync(
+        Persona persona,
+        List<ChatMessage> conversationHistory,
+        string userMessage,
+        CancellationToken cancellationToken = default)
+    {
+        var systemPrompt = BuildSystemPrompt(persona);
+        var messages = BuildMessages(conversationHistory, userMessage);
+
+        try
+        {
+            return await CallGeminiApiAsync(systemPrompt, messages, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Gemini API call failed, attempting Freeway fallback");
+            if (!string.IsNullOrEmpty(_freewayApiUrl) && !string.IsNullOrEmpty(_freewayApiKey))
+            {
+                return await CallFreewayApiAsync(systemPrompt, messages, cancellationToken);
+            }
+            throw;
+        }
+    }
+
+    public async IAsyncEnumerable<string> StreamResponseAsync(
+        Persona persona,
+        List<ChatMessage> conversationHistory,
+        string userMessage,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var systemPrompt = BuildSystemPrompt(persona);
+        var messages = BuildMessages(conversationHistory, userMessage);
+
+        var url = $"https://generativelanguage.googleapis.com/v1beta/models/{_model}:streamGenerateContent?key={_apiKey}";
+
+        var requestBody = new
+        {
+            contents = messages.Select(m => new
+            {
+                role = m.role,
+                parts = new[] { new { text = m.content } }
+            }).ToArray(),
+            systemInstruction = new
+            {
+                parts = new[] { new { text = systemPrompt } }
+            },
+            generationConfig = new
+            {
+                temperature = _temperature,
+                maxOutputTokens = _maxTokens
+            }
+        };
+
+        var request = new HttpRequestMessage(HttpMethod.Post, url)
+        {
+            Content = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json")
+        };
+
+        using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var reader = new StreamReader(stream);
+
+        while (!reader.EndOfStream)
+        {
+            var line = await reader.ReadLineAsync(cancellationToken);
+            if (string.IsNullOrEmpty(line)) continue;
+
+            // Parse SSE data
+            if (line.StartsWith("data: "))
+            {
+                var data = line[6..];
+                if (data == "[DONE]") break;
+
+                var text = TryParseStreamChunk(data);
+                if (!string.IsNullOrEmpty(text))
+                {
+                    yield return text;
+                }
+            }
+        }
+    }
+
+    private async Task<GeminiResponse> CallGeminiApiAsync(
+        string systemPrompt,
+        List<(string role, string content)> messages,
+        CancellationToken cancellationToken)
+    {
+        var url = $"https://generativelanguage.googleapis.com/v1beta/models/{_model}:generateContent?key={_apiKey}";
+
+        var requestBody = new
+        {
+            contents = messages.Select(m => new
+            {
+                role = m.role,
+                parts = new[] { new { text = m.content } }
+            }).ToArray(),
+            systemInstruction = new
+            {
+                parts = new[] { new { text = systemPrompt } }
+            },
+            generationConfig = new
+            {
+                temperature = _temperature,
+                maxOutputTokens = _maxTokens
+            }
+        };
+
+        var response = await _httpClient.PostAsJsonAsync(url, requestBody, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+
+        var text = doc.RootElement
+            .GetProperty("candidates")[0]
+            .GetProperty("content")
+            .GetProperty("parts")[0]
+            .GetProperty("text")
+            .GetString() ?? "";
+
+        var tokensUsed = doc.RootElement
+            .TryGetProperty("usageMetadata", out var usage)
+            ? usage.GetProperty("totalTokenCount").GetInt32()
+            : 0;
+
+        return new GeminiResponse(text, tokensUsed);
+    }
+
+    private async Task<GeminiResponse> CallFreewayApiAsync(
+        string systemPrompt,
+        List<(string role, string content)> messages,
+        CancellationToken cancellationToken)
+    {
+        var url = _freewayApiUrl!;
+
+        var openAiMessages = new List<object>
+        {
+            new { role = "system", content = systemPrompt }
+        };
+
+        foreach (var m in messages)
+        {
+            openAiMessages.Add(new { role = m.role == "user" ? "user" : "assistant", content = m.content });
+        }
+
+        var requestBody = new
+        {
+            model = _freewayModel,
+            messages = openAiMessages,
+            temperature = _temperature,
+            max_tokens = _maxTokens
+        };
+
+        var request = new HttpRequestMessage(HttpMethod.Post, url)
+        {
+            Content = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json")
+        };
+        request.Headers.Add("Authorization", $"Bearer {_freewayApiKey}");
+
+        var response = await _httpClient.SendAsync(request, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+
+        var text = doc.RootElement
+            .GetProperty("choices")[0]
+            .GetProperty("message")
+            .GetProperty("content")
+            .GetString() ?? "";
+
+        var tokensUsed = doc.RootElement
+            .TryGetProperty("usage", out var usage)
+            ? usage.GetProperty("total_tokens").GetInt32()
+            : 0;
+
+        return new GeminiResponse(text, tokensUsed);
+    }
+
+    private string BuildSystemPrompt(Persona persona)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"You are {persona.Name}.");
+
+        if (!string.IsNullOrEmpty(persona.Description))
+            sb.AppendLine($"Description: {persona.Description}");
+
+        if (!string.IsNullOrEmpty(persona.Bio))
+            sb.AppendLine($"Bio: {persona.Bio}");
+
+        if (persona.PersonalityTraits?.Count > 0)
+            sb.AppendLine($"Personality traits: {string.Join(", ", persona.PersonalityTraits)}");
+
+        if (!string.IsNullOrEmpty(persona.LanguageStyle))
+            sb.AppendLine($"Communication style: {persona.LanguageStyle}");
+
+        if (persona.Expertise?.Count > 0)
+            sb.AppendLine($"Areas of expertise: {string.Join(", ", persona.Expertise)}");
+
+        // Add knowledge base content if available
+        if (persona.KnowledgeBases?.Count > 0)
+        {
+            sb.AppendLine("\nKnowledge Base:");
+            foreach (var kb in persona.KnowledgeBases.Where(k => k.Status == KnowledgeStatus.Active))
+            {
+                sb.AppendLine($"- {kb.Content}");
+            }
+        }
+
+        sb.AppendLine("\nRespond naturally in character. Be helpful, engaging, and consistent with your personality.");
+
+        return sb.ToString();
+    }
+
+    private List<(string role, string content)> BuildMessages(List<ChatMessage> history, string userMessage)
+    {
+        var messages = new List<(string role, string content)>();
+
+        // Take the last N messages for context
+        var recentHistory = history
+            .OrderByDescending(m => m.CreatedAt)
+            .Take(_maxConversationHistory)
+            .Reverse()
+            .ToList();
+
+        foreach (var msg in recentHistory)
+        {
+            var role = msg.SenderType == SenderType.User ? "user" : "model";
+            messages.Add((role, msg.Text));
+        }
+
+        // Add the current user message
+        messages.Add(("user", userMessage));
+
+        return messages;
+    }
+
+    private string? TryParseStreamChunk(string data)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(data);
+            return doc.RootElement
+                .GetProperty("candidates")[0]
+                .GetProperty("content")
+                .GetProperty("parts")[0]
+                .GetProperty("text")
+                .GetString();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to parse streaming response chunk");
+            return null;
+        }
+    }
+}
