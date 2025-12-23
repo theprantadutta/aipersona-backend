@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using AiPersona.Domain.Entities;
-using System.Text.Json;
 
 namespace AiPersona.Infrastructure.Persistence.Configurations;
 
@@ -13,12 +12,8 @@ public class UserActivityConfiguration : IEntityTypeConfiguration<UserActivity>
 
         builder.Property(a => a.Description).HasMaxLength(1000);
 
-        // Store Metadata as JSON
-        builder.Property(a => a.Metadata)
-            .HasColumnType("text")
-            .HasConversion(
-                v => v == null ? null : JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
-                v => v == null ? null : JsonSerializer.Deserialize<Dictionary<string, object>>(v, (JsonSerializerOptions?)null));
+        // Metadata stored as JSON text
+        builder.Property(a => a.Metadata).HasColumnType("text");
 
         // Enum conversions
         builder.Property(a => a.ActivityType).HasConversion<string>().HasMaxLength(50);

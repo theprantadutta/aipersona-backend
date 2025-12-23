@@ -88,7 +88,7 @@ public record ActivityItemDto(
     string Description,
     Guid? TargetId,
     string? TargetType,
-    Dictionary<string, object>? Metadata,
+    string? Metadata,  // JSON serialized metadata
     DateTime CreatedAt);
 
 public record ActivityFeedDto(

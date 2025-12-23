@@ -10,7 +10,7 @@ public class UserActivity : BaseEntity
     public Guid? TargetId { get; set; }
     public ContentType? TargetType { get; set; }
     public string? Description { get; set; }
-    public Dictionary<string, object>? Metadata { get; set; }
+    public string? Metadata { get; set; }  // JSON serialized metadata
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation property
