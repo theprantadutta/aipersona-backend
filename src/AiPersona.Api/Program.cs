@@ -1,25 +1,36 @@
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Hangfire;
+using Hangfire.Dashboard;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Scalar.AspNetCore;
 using Serilog;
+using Serilog.Events;
 using AiPersona.Api.Hubs;
 using AiPersona.Api.Services;
 using AiPersona.Application;
 using AiPersona.Application.Common.Interfaces;
 using AiPersona.Infrastructure;
 
-// Load .env file if exists
-var envPath = Path.Combine(Directory.GetCurrentDirectory(), ".env");
-if (File.Exists(envPath))
+// Load .env file if it exists (check multiple locations)
+var possibleEnvPaths = new[]
 {
-    foreach (var line in File.ReadAllLines(envPath))
+    Path.Combine(Directory.GetCurrentDirectory(), ".env"),
+    Path.Combine(Directory.GetCurrentDirectory(), "..", "..", ".env"),
+    Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".env"),
+};
+
+var envFilePath = possibleEnvPaths.FirstOrDefault(File.Exists);
+if (envFilePath != null)
+{
+    foreach (var line in File.ReadAllLines(envFilePath))
     {
         if (string.IsNullOrWhiteSpace(line) || line.StartsWith('#'))
             continue;
 
-        var parts = line.Split('=', 2, StringSplitOptions.RemoveEmptyEntries);
+        var parts = line.Split('=', 2);
         if (parts.Length == 2)
         {
             Environment.SetEnvironmentVariable(parts[0].Trim(), parts[1].Trim());
@@ -27,186 +38,315 @@ if (File.Exists(envPath))
     }
 }
 
-var builder = WebApplication.CreateBuilder(args);
-
 // Configure Serilog
 Log.Logger = new LoggerConfiguration()
-    .ReadFrom.Configuration(builder.Configuration)
+    .MinimumLevel.Information()
+    .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
+    .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
+    .MinimumLevel.Override("Microsoft.EntityFrameworkCore", LogEventLevel.Warning)
+    .MinimumLevel.Override("Hangfire", LogEventLevel.Warning)
     .Enrich.FromLogContext()
-    .WriteTo.Console()
-    .WriteTo.File("logs/aipersona-.log", rollingInterval: RollingInterval.Day)
+    .Enrich.WithEnvironmentName()
+    .Enrich.WithThreadId()
+    .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
+    .WriteTo.File(
+        path: "logs/aipersona-.log",
+        rollingInterval: RollingInterval.Day,
+        retainedFileCountLimit: 30,
+        outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
     .CreateLogger();
 
-builder.Host.UseSerilog();
-
-// Add Application and Infrastructure services
-builder.Services.AddApplication();
-builder.Services.AddInfrastructure(builder.Configuration);
-
-// Add HttpContextAccessor for CurrentUserService
-builder.Services.AddHttpContextAccessor();
-builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
-
-// Configure JWT Authentication
-var jwtSecret = builder.Configuration["Jwt:SecretKey"]
-    ?? Environment.GetEnvironmentVariable("JWT_SECRET_KEY")
-    ?? throw new InvalidOperationException("JWT secret key is not configured");
-
-var jwtIssuer = builder.Configuration["Jwt:Issuer"]
-    ?? Environment.GetEnvironmentVariable("JWT_ISSUER")
-    ?? "AiPersona";
-
-var jwtAudience = builder.Configuration["Jwt:Audience"]
-    ?? Environment.GetEnvironmentVariable("JWT_AUDIENCE")
-    ?? "AiPersonaApp";
-
-builder.Services.AddAuthentication(options =>
+try
 {
-    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-})
-.AddJwtBearer(options =>
-{
-    options.TokenValidationParameters = new TokenValidationParameters
-    {
-        ValidateIssuer = true,
-        ValidateAudience = true,
-        ValidateLifetime = true,
-        ValidateIssuerSigningKey = true,
-        ValidIssuer = jwtIssuer,
-        ValidAudience = jwtAudience,
-        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret)),
-        ClockSkew = TimeSpan.Zero
-    };
+    Log.Information("Starting AiPersona API...");
 
-    // Support SignalR token from query string
-    options.Events = new JwtBearerEvents
-    {
-        OnMessageReceived = context =>
+    var builder = WebApplication.CreateBuilder(args);
+
+    // Use Serilog
+    builder.Host.UseSerilog();
+
+    // Add Application and Infrastructure layers
+    builder.Services.AddApplication();
+    builder.Services.AddInfrastructure(builder.Configuration);
+
+    // Add HttpContextAccessor for CurrentUserService
+    builder.Services.AddHttpContextAccessor();
+    builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
+
+    // Configure JSON serialization (snake_case for frontend compatibility)
+    builder.Services.AddControllers()
+        .AddJsonOptions(options =>
         {
-            var accessToken = context.Request.Query["access_token"];
-            var path = context.HttpContext.Request.Path;
+            options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower;
+            options.JsonSerializerOptions.DictionaryKeyPolicy = JsonNamingPolicy.SnakeCaseLower;
+            options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.SnakeCaseLower));
+            options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+        });
 
-            if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
+    // Configure CORS
+    var allowedOrigins = builder.Configuration["AllowedOrigins"]
+        ?? Environment.GetEnvironmentVariable("ALLOWED_ORIGINS")
+        ?? "*";
+
+    builder.Services.AddCors(options =>
+    {
+        options.AddDefaultPolicy(policy =>
+        {
+            if (allowedOrigins == "*")
             {
-                context.Token = accessToken;
+                policy.AllowAnyOrigin()
+                    .AllowAnyMethod()
+                    .AllowAnyHeader();
             }
-            return Task.CompletedTask;
+            else
+            {
+                policy.WithOrigins(allowedOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                    .AllowAnyMethod()
+                    .AllowAnyHeader()
+                    .AllowCredentials();
+            }
+        });
+    });
+
+    // Configure JWT Authentication
+    var jwtSecretKey = builder.Configuration["Jwt:SecretKey"]
+        ?? Environment.GetEnvironmentVariable("JWT_SECRET_KEY")
+        ?? throw new InvalidOperationException("JWT_SECRET_KEY is not configured");
+
+    var jwtIssuer = builder.Configuration["Jwt:Issuer"]
+        ?? Environment.GetEnvironmentVariable("JWT_ISSUER")
+        ?? "AiPersona";
+
+    var jwtAudience = builder.Configuration["Jwt:Audience"]
+        ?? Environment.GetEnvironmentVariable("JWT_AUDIENCE")
+        ?? "AiPersonaApp";
+
+    builder.Services.AddAuthentication(options =>
+    {
+        options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+        options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+    })
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecretKey)),
+            ValidateIssuer = true,
+            ValidIssuer = jwtIssuer,
+            ValidateAudience = true,
+            ValidAudience = jwtAudience,
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.Zero
+        };
+
+        // Support SignalR authentication via query string
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                var path = context.HttpContext.Request.Path;
+
+                if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
+                {
+                    context.Token = accessToken;
+                }
+
+                return Task.CompletedTask;
+            }
+        };
+    });
+
+    builder.Services.AddAuthorization();
+
+    // Add SignalR
+    builder.Services.AddSignalR()
+        .AddJsonProtocol(options =>
+        {
+            options.PayloadSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower;
+            options.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.SnakeCaseLower));
+        });
+
+    // Configure OpenAPI with Scalar
+    builder.Services.AddOpenApi();
+
+    var app = builder.Build();
+
+    // Configure the HTTP request pipeline
+
+    // Global exception handler
+    app.UseExceptionHandler(errorApp =>
+    {
+        errorApp.Run(async context =>
+        {
+            context.Response.StatusCode = 500;
+            context.Response.ContentType = "application/json";
+
+            var error = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>();
+            if (error != null)
+            {
+                Log.Error(error.Error, "Unhandled exception");
+
+                var response = new
+                {
+                    error = "An unexpected error occurred",
+                    message = app.Environment.IsDevelopment() ? error.Error.Message : "Internal server error"
+                };
+
+                await context.Response.WriteAsJsonAsync(response);
+            }
+        });
+    });
+
+    // Request logging
+    app.UseSerilogRequestLogging(options =>
+    {
+        options.MessageTemplate = "{RequestMethod} {RequestPath} responded {StatusCode} in {Elapsed:0.0000} ms";
+    });
+
+    app.UseHttpsRedirection();
+    app.UseCors();
+    app.UseAuthentication();
+    app.UseAuthorization();
+
+    // OpenAPI and Scalar UI (only in Development)
+    if (app.Environment.IsDevelopment())
+    {
+        app.MapOpenApi();
+        app.MapScalarApiReference(options =>
+        {
+            options.WithTheme(ScalarTheme.Mars).WithTitle("AiPersona API");
+        });
+    }
+
+    // Hangfire Dashboard
+    var hangfireUsername = Environment.GetEnvironmentVariable("HANGFIRE_USERNAME") ?? "admin";
+    var hangfirePassword = Environment.GetEnvironmentVariable("HANGFIRE_PASSWORD") ?? "admin";
+
+    app.UseHangfireDashboard("/hangfire", new DashboardOptions
+    {
+        Authorization = new[] { new HangfireAuthorizationFilter(
+            app.Environment.IsDevelopment(),
+            hangfireUsername,
+            hangfirePassword) }
+    });
+
+    // Configure Hangfire recurring jobs
+    ConfigureRecurringJobs();
+
+    // Map controllers and SignalR hubs
+    app.MapControllers();
+    app.MapHub<ChatHub>("/hubs/chat");
+    app.MapHub<NotificationHub>("/hubs/notifications");
+
+    // Health check endpoint
+    app.MapGet("/health", () => Results.Ok(new
+    {
+        status = "healthy",
+        timestamp = DateTime.UtcNow,
+        version = "1.0.0"
+    }));
+
+    // Root endpoint
+    app.MapGet("/", (IWebHostEnvironment env) => env.IsDevelopment()
+        ? Results.Redirect("/scalar/v1")
+        : Results.Ok(new { name = "AiPersona API", version = "1.0.0", status = "running" }));
+
+    var port = Environment.GetEnvironmentVariable("API_PORT") ?? "8001";
+    app.Urls.Add($"http://0.0.0.0:{port}");
+
+    Log.Information("AiPersona API started on port {Port}", port);
+
+    app.Run();
+}
+catch (Exception ex)
+{
+    Log.Fatal(ex, "Application terminated unexpectedly");
+}
+finally
+{
+    Log.CloseAndFlush();
+}
+
+// Configure recurring background jobs
+static void ConfigureRecurringJobs()
+{
+    // Cleanup free tier history - daily at midnight UTC
+    RecurringJob.AddOrUpdate<AiPersona.Infrastructure.Jobs.CleanupFreeTierHistoryJob>(
+        "cleanup-free-tier-history",
+        job => job.Execute(),
+        "0 0 * * *",
+        new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
+
+    // Reset daily counters - daily at midnight UTC
+    RecurringJob.AddOrUpdate<AiPersona.Infrastructure.Jobs.ResetDailyCountersJob>(
+        "reset-daily-counters",
+        job => job.Execute(),
+        "0 0 * * *",
+        new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
+
+    // Check subscription expirations - daily at 00:30 UTC
+    RecurringJob.AddOrUpdate<AiPersona.Infrastructure.Jobs.CheckSubscriptionExpirationsJob>(
+        "check-subscription-expirations",
+        job => job.Execute(),
+        "30 0 * * *",
+        new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
+
+    Log.Information("Hangfire recurring jobs configured successfully");
+}
+
+// Hangfire authorization filter for dashboard with Basic Auth
+public class HangfireAuthorizationFilter : IDashboardAuthorizationFilter
+{
+    private readonly bool _isDevelopment;
+    private readonly string _username;
+    private readonly string _password;
+
+    public HangfireAuthorizationFilter(bool isDevelopment, string username, string password)
+    {
+        _isDevelopment = isDevelopment;
+        _username = username;
+        _password = password;
+    }
+
+    public bool Authorize(DashboardContext context)
+    {
+        // In development, allow all access without auth
+        if (_isDevelopment)
+            return true;
+
+        // In production, require Basic Auth
+        var httpContext = context.GetHttpContext();
+        var authHeader = httpContext.Request.Headers["Authorization"].FirstOrDefault();
+
+        if (string.IsNullOrEmpty(authHeader) || !authHeader.StartsWith("Basic "))
+        {
+            SetUnauthorizedResponse(httpContext);
+            return false;
         }
-    };
-});
 
-builder.Services.AddAuthorization();
+        try
+        {
+            var encodedCredentials = authHeader.Substring("Basic ".Length).Trim();
+            var credentials = Encoding.UTF8.GetString(Convert.FromBase64String(encodedCredentials));
+            var parts = credentials.Split(':', 2);
 
-// Add Controllers with JSON options
-builder.Services.AddControllers()
-    .AddJsonOptions(options =>
+            if (parts.Length == 2 && parts[0] == _username && parts[1] == _password)
+                return true;
+        }
+        catch
+        {
+            // Invalid base64 or other error
+        }
+
+        SetUnauthorizedResponse(httpContext);
+        return false;
+    }
+
+    private static void SetUnauthorizedResponse(HttpContext httpContext)
     {
-        options.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.SnakeCaseLower;
-        options.JsonSerializerOptions.DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
-    });
-
-// Add API versioning
-builder.Services.AddApiVersioning(options =>
-{
-    options.DefaultApiVersion = new Asp.Versioning.ApiVersion(1, 0);
-    options.AssumeDefaultVersionWhenUnspecified = true;
-    options.ReportApiVersions = true;
-});
-
-// Add OpenAPI / Swagger
-builder.Services.AddOpenApi();
-
-// Add SignalR
-builder.Services.AddSignalR();
-
-// Configure CORS
-var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
-    ?? ["http://localhost:3000", "http://localhost:5173"];
-
-builder.Services.AddCors(options =>
-{
-    options.AddDefaultPolicy(policy =>
-    {
-        policy.WithOrigins(allowedOrigins)
-            .AllowAnyHeader()
-            .AllowAnyMethod()
-            .AllowCredentials();
-    });
-});
-
-var app = builder.Build();
-
-// Configure the HTTP request pipeline
-app.UseSerilogRequestLogging();
-
-if (app.Environment.IsDevelopment())
-{
-    app.MapOpenApi();
-    app.MapScalarApiReference();
-}
-
-app.UseHttpsRedirection();
-app.UseCors();
-app.UseAuthentication();
-app.UseAuthorization();
-
-// Map Controllers
-app.MapControllers();
-
-// Map SignalR Hubs
-app.MapHub<ChatHub>("/hubs/chat");
-app.MapHub<NotificationHub>("/hubs/notifications");
-
-// Configure Hangfire Dashboard (only in development or with auth)
-if (app.Environment.IsDevelopment())
-{
-    app.UseHangfireDashboard("/hangfire", new DashboardOptions
-    {
-        Authorization = [new HangfireLocalAuthFilter()],
-        DashboardTitle = "AiPersona Background Jobs"
-    });
-}
-else
-{
-    app.UseHangfireDashboard("/hangfire", new DashboardOptions
-    {
-        Authorization = [new HangfireAdminAuthFilter()],
-        DashboardTitle = "AiPersona Background Jobs"
-    });
-}
-
-// Schedule recurring jobs
-RecurringJob.AddOrUpdate<AiPersona.Infrastructure.Jobs.CleanupFreeTierHistoryJob>(
-    "cleanup-free-tier-history",
-    job => job.Execute(),
-    "0 0 * * *"); // Daily at midnight UTC
-
-RecurringJob.AddOrUpdate<AiPersona.Infrastructure.Jobs.ResetDailyCountersJob>(
-    "reset-daily-counters",
-    job => job.Execute(),
-    "0 0 * * *"); // Daily at midnight UTC
-
-RecurringJob.AddOrUpdate<AiPersona.Infrastructure.Jobs.CheckSubscriptionExpirationsJob>(
-    "check-subscription-expirations",
-    job => job.Execute(),
-    "30 0 * * *"); // Daily at 00:30 UTC
-
-app.Run();
-
-// Hangfire Auth Filters
-public class HangfireLocalAuthFilter : Hangfire.Dashboard.IDashboardAuthorizationFilter
-{
-    public bool Authorize(Hangfire.Dashboard.DashboardContext context) => true;
-}
-
-public class HangfireAdminAuthFilter : Hangfire.Dashboard.IDashboardAuthorizationFilter
-{
-    public bool Authorize(Hangfire.Dashboard.DashboardContext context)
-    {
-        // In production, require authenticated admin user via the JWT token
-        // The user must have accessed the dashboard through an authenticated endpoint
-        // For now, allow local requests only in production
-        return false; // Disable in production by default - enable via authenticated proxy
+        httpContext.Response.StatusCode = 401;
+        httpContext.Response.Headers["WWW-Authenticate"] = "Basic realm=\"Hangfire Dashboard\"";
     }
 }
