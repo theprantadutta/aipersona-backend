@@ -10,13 +10,12 @@ public class ContentReportConfiguration : IEntityTypeConfiguration<ContentReport
     {
         builder.HasKey(r => r.Id);
 
-        builder.Property(r => r.ContentId).HasMaxLength(255).IsRequired();
-        builder.Property(r => r.AdditionalInfo).HasColumnType("text");
+        builder.Property(r => r.Reason).HasMaxLength(500).IsRequired();
+        builder.Property(r => r.Description).HasColumnType("text");
         builder.Property(r => r.Resolution).HasColumnType("text");
 
         // Enum conversions
         builder.Property(r => r.ContentType).HasConversion<string>().HasMaxLength(50);
-        builder.Property(r => r.Reason).HasConversion<string>().HasMaxLength(50);
         builder.Property(r => r.Status).HasConversion<string>().HasMaxLength(50);
 
         // Indexes
@@ -25,5 +24,16 @@ public class ContentReportConfiguration : IEntityTypeConfiguration<ContentReport
         builder.HasIndex(r => r.ContentType);
         builder.HasIndex(r => r.Status);
         builder.HasIndex(r => r.CreatedAt).IsDescending();
+
+        // Relationships
+        builder.HasOne(r => r.Reporter)
+            .WithMany()
+            .HasForeignKey(r => r.ReporterId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(r => r.ResolvedBy)
+            .WithMany()
+            .HasForeignKey(r => r.ResolvedById)
+            .OnDelete(DeleteBehavior.SetNull);
     }
 }

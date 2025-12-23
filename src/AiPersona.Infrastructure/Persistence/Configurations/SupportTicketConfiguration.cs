@@ -11,7 +11,6 @@ public class SupportTicketConfiguration : IEntityTypeConfiguration<SupportTicket
         builder.HasKey(t => t.Id);
 
         builder.Property(t => t.Subject).HasMaxLength(255).IsRequired();
-        builder.Property(t => t.Description).HasColumnType("text").IsRequired();
 
         // Enum conversions
         builder.Property(t => t.Category).HasConversion<string>().HasMaxLength(50);
@@ -22,12 +21,18 @@ public class SupportTicketConfiguration : IEntityTypeConfiguration<SupportTicket
         builder.HasIndex(t => t.UserId);
         builder.HasIndex(t => t.Status);
         builder.HasIndex(t => t.Priority);
-        builder.HasIndex(t => t.AssignedTo);
+        builder.HasIndex(t => t.AssignedToId);
         builder.HasIndex(t => t.CreatedAt).IsDescending();
 
-        builder.HasOne(t => t.AssignedAgent)
+        // Relationships
+        builder.HasOne(t => t.User)
             .WithMany()
-            .HasForeignKey(t => t.AssignedTo)
+            .HasForeignKey(t => t.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(t => t.AssignedTo)
+            .WithMany()
+            .HasForeignKey(t => t.AssignedToId)
             .OnDelete(DeleteBehavior.SetNull);
 
         builder.HasMany(t => t.Messages)

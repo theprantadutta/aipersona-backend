@@ -19,10 +19,23 @@ public class User : BaseEntity
 
     // Profile
     public string? Bio { get; set; }
+    public string? ProfileImage { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? LastLogin { get; set; }
+    public DateTime? LastActiveAt { get; set; }
     public bool IsActive { get; set; } = true;
     public bool IsAdmin { get; set; }
+
+    // Suspension
+    public bool IsSuspended { get; set; }
+    public DateTime? SuspendedAt { get; set; }
+    public DateTime? SuspendedUntil { get; set; }
+    public string? SuspensionReason { get; set; }
+
+    // Social
+    public int FollowerCount { get; set; }
+    public int FollowingCount { get; set; }
 
     // Google Play Subscriptions
     public SubscriptionTier SubscriptionTier { get; set; } = SubscriptionTier.Free;

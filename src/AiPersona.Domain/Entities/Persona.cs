@@ -28,10 +28,15 @@ public class Persona : AuditableEntity
     public bool IsPublic { get; set; } = true;
     public bool IsMarketplace { get; set; }
 
+    // AI Configuration
+    public string? Prompt { get; set; }
+
     // Analytics
     public int ConversationCount { get; set; }
     public int CloneCount { get; set; }
     public int LikeCount { get; set; }
+    public int FavoriteCount { get; set; }
+    public int ViewCount { get; set; }
 
     // Cloning support
     public Guid? ClonedFromPersonaId { get; set; }

@@ -11,7 +11,8 @@ public class FcmToken : BaseEntity
     public string Token { get; set; } = null!;
 
     // Device information
-    public string DeviceId { get; set; } = null!;
+    public string? DeviceId { get; set; }
+    public string? DeviceName { get; set; }
     public Platform Platform { get; set; }
 
     // Status
@@ -19,7 +20,7 @@ public class FcmToken : BaseEntity
 
     // Timestamps
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-    public DateTime LastUsedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? LastActiveAt { get; set; }
 
     // Navigation property
     public User User { get; set; } = null!;

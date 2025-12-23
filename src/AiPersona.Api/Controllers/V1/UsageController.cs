@@ -25,12 +25,11 @@ public class UsageController : BaseApiController
     [HttpGet("history")]
     [Authorize]
     public async Task<ActionResult> GetUsageHistory(
-        [FromQuery] DateTime? startDate = null,
-        [FromQuery] DateTime? endDate = null,
+        [FromQuery] int days = 30,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 30)
     {
-        var result = await Mediator.Send(new GetUsageHistoryQuery(startDate, endDate, page, pageSize));
+        var result = await Mediator.Send(new GetUsageHistoryQuery(days, page, pageSize));
         return HandleResult(result);
     }
 
@@ -39,9 +38,9 @@ public class UsageController : BaseApiController
     /// </summary>
     [HttpGet("analytics")]
     [Authorize]
-    public async Task<ActionResult> GetUsageAnalytics([FromQuery] int days = 30)
+    public async Task<ActionResult> GetUsageAnalytics()
     {
-        var result = await Mediator.Send(new GetUsageAnalyticsQuery(days));
+        var result = await Mediator.Send(new GetUsageAnalyticsQuery());
         return HandleResult(result);
     }
 }

@@ -9,7 +9,7 @@ using AiPersona.Application.Features.Support.Commands.AssignTicket;
 using AiPersona.Application.Features.Support.Commands.EscalateTicket;
 using AiPersona.Application.Features.Support.Queries.GetTicket;
 using AiPersona.Application.Features.Support.Queries.GetTickets;
-using AiPersona.Application.Features.Support.Queries.GetTicketMessages;
+using AiPersona.Application.Features.Support.Queries.GetMessages;
 
 namespace AiPersona.Api.Controllers.V1;
 
@@ -34,10 +34,11 @@ public class SupportController : BaseApiController
     public async Task<ActionResult> GetTickets(
         [FromQuery] string? status = null,
         [FromQuery] string? priority = null,
+        [FromQuery] bool myTicketsOnly = false,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20)
     {
-        var result = await Mediator.Send(new GetTicketsQuery(status, priority, page, pageSize));
+        var result = await Mediator.Send(new GetTicketsQuery(status, priority, myTicketsOnly, page, pageSize));
         return HandleResult(result);
     }
 
@@ -62,7 +63,7 @@ public class SupportController : BaseApiController
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50)
     {
-        var result = await Mediator.Send(new GetTicketMessagesQuery(ticketId, page, pageSize));
+        var result = await Mediator.Send(new GetMessagesQuery(ticketId, page, pageSize));
         return HandleResult(result);
     }
 

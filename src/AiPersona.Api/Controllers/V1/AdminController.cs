@@ -18,9 +18,9 @@ public class AdminController : BaseApiController
     /// Get admin dashboard analytics
     /// </summary>
     [HttpGet("dashboard")]
-    public async Task<ActionResult> GetDashboard([FromQuery] int days = 30)
+    public async Task<ActionResult> GetDashboard()
     {
-        var result = await Mediator.Send(new GetDashboardQuery(days));
+        var result = await Mediator.Send(new GetDashboardQuery());
         return HandleResult(result);
     }
 
@@ -30,15 +30,12 @@ public class AdminController : BaseApiController
     [HttpGet("users")]
     public async Task<ActionResult> GetUsers(
         [FromQuery] string? search = null,
-        [FromQuery] string? subscriptionTier = null,
-        [FromQuery] bool? isActive = null,
-        [FromQuery] string sortBy = "created_at",
-        [FromQuery] string sortOrder = "desc",
+        [FromQuery] string? tier = null,
+        [FromQuery] bool? isSuspended = null,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20)
     {
-        var result = await Mediator.Send(new GetUsersQuery(
-            search, subscriptionTier, isActive, sortBy, sortOrder, page, pageSize));
+        var result = await Mediator.Send(new GetUsersQuery(search, tier, isSuspended, page, pageSize));
         return HandleResult(result);
     }
 

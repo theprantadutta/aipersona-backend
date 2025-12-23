@@ -7,9 +7,10 @@ public class UserActivity : BaseEntity
 {
     public Guid UserId { get; set; }
     public ActivityType ActivityType { get; set; }
-    public string? TargetId { get; set; }
-    public string? TargetType { get; set; }
-    public string? ActivityData { get; set; }
+    public Guid? TargetId { get; set; }
+    public ContentType? TargetType { get; set; }
+    public string? Description { get; set; }
+    public Dictionary<string, object>? Metadata { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation property

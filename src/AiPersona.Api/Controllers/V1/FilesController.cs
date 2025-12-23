@@ -18,7 +18,10 @@ public class FilesController : BaseApiController
         IFormFile file,
         [FromQuery] string category = "general")
     {
-        var result = await Mediator.Send(new UploadFileCommand(file, category));
+        var result = await Mediator.Send(new UploadFileCommand(
+            file.OpenReadStream(),
+            file.FileName,
+            category));
         return HandleResult(result);
     }
 

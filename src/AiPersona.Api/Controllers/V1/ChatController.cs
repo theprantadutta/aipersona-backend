@@ -155,9 +155,9 @@ public class ChatController : BaseApiController
     /// </summary>
     [HttpGet("statistics")]
     [Authorize]
-    public async Task<ActionResult> GetChatStatistics([FromQuery] int days = 30)
+    public async Task<ActionResult> GetChatStatistics()
     {
-        var result = await Mediator.Send(new GetStatisticsQuery(days));
+        var result = await Mediator.Send(new GetStatisticsQuery());
         return HandleResult(result);
     }
 }

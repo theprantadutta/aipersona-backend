@@ -9,13 +9,12 @@ public class SupportTicket : AuditableEntity
 
     // Ticket information
     public string Subject { get; set; } = null!;
-    public string Description { get; set; } = null!;
     public TicketCategory Category { get; set; }
     public TicketPriority Priority { get; set; } = TicketPriority.Medium;
     public TicketStatus Status { get; set; } = TicketStatus.Open;
 
     // Assignment
-    public Guid? AssignedTo { get; set; }
+    public Guid? AssignedToId { get; set; }
     public DateTime? AssignedAt { get; set; }
 
     // Resolution
@@ -24,6 +23,6 @@ public class SupportTicket : AuditableEntity
 
     // Navigation properties
     public User User { get; set; } = null!;
-    public User? AssignedAgent { get; set; }
+    public User? AssignedTo { get; set; }
     public ICollection<SupportTicketMessage> Messages { get; set; } = new List<SupportTicketMessage>();
 }
