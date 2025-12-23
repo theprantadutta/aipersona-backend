@@ -1,9 +1,10 @@
 using Microsoft.EntityFrameworkCore;
 using AiPersona.Domain.Entities;
+using AiPersona.Application.Common.Interfaces;
 
 namespace AiPersona.Infrastructure.Persistence;
 
-public class ApplicationDbContext : DbContext
+public class ApplicationDbContext : DbContext, IApplicationDbContext
 {
     public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : base(options)
     {
