@@ -1,0 +1,7 @@
+﻿services:
+  aipersona-backend:
+    image: aipersona-backend
+    build:
+      context: .
+      dockerfile: Dockerfile
+

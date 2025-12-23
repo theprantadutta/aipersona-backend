@@ -1,0 +1,44 @@
+bin/
+obj/
+/packages/
+riderModule.iml
+/_ReSharper.Caches/
+
+# Sensitive files - DO NOT COMMIT
+appsettings.Development.json
+appsettings.Production.json
+appsettings.Local.json
+firebase-admin-sdk.json
+google-play-service-account.json
+*.env
+.env*
+
+# User-specific files
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# VS Code
+.vscode/
+
+# Rider
+.idea/
+
+# Logs
+logs/
+*.log
