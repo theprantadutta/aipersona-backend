@@ -71,6 +71,12 @@ public static class DependencyInjection
         // Google Play service
         services.AddSingleton<IGooglePlayService, GooglePlayService>();
 
+        // FileRunner service
+        services.AddHttpClient<IFileRunnerService, FileRunnerService>();
+
+        // Persona seeder service
+        services.AddScoped<IPersonaSeederService, PersonaSeederService>();
+
         return services;
     }
 

@@ -5,5 +5,6 @@ public enum SubscriptionTier
     Free,
     Basic,
     Premium,
-    Pro
+    Pro,
+    Lifetime
 }

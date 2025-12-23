@@ -12,7 +12,18 @@
       "Bash(dotnet restore:*)",
       "Bash(dotnet build:*)",
       "Bash(git reset:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nPhase 1: Setup Clean Architecture project structure\n\n- Create 4-layer Clean Architecture: Domain, Application, Infrastructure, Api\n- Add project references following dependency rules\n- Add NuGet packages for each layer:\n  - Application: MediatR, FluentValidation, Mapster, EF Core\n  - Infrastructure: Npgsql.EF, Firebase, Hangfire, JWT, BCrypt\n  - Api: JWT Bearer, Serilog, Scalar, API Versioning\n- Update .gitignore with sensitive files protection\n- Remove template files \\(WeatherForecast\\)\nEOF\n\\)\")",
+      "Bash(git commit:*)",
+      "Bash(dotnet ef migrations add:*)",
+      "Bash(echo:*)",
+      "Bash(powershell -c \"\\(Get-ChildItem -Path ''src\\\\AiPersona.Domain'' -Filter ''*.cs'' -Recurse\\).Count\")",
+      "Bash(powershell -c \"\\(Get-ChildItem -Path ''src\\\\AiPersona.Application'' -Filter ''*.cs'' -Recurse\\).Count\")",
+      "Bash(powershell -c \"\\(Get-ChildItem -Path ''src\\\\AiPersona.Infrastructure'' -Filter ''*.cs'' -Recurse\\).Count\")",
+      "Bash(powershell -c \"\\(Get-ChildItem -Path ''src\\\\AiPersona.Api'' -Filter ''*.cs'' -Recurse\\).Count\")",
+      "Bash(cmd /c \"del /f /q \\\\?\\\\F:\\\\Personal\\\\MyProjects\\\\aipersona-backend\\\\nul\")",
+      "Bash(grep:*)",
+      "Bash(flutter analyze:*)"
     ]
   }
 }

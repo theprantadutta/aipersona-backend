@@ -101,21 +101,35 @@ public class SearchSessionsQueryHandler : IRequestHandler<SearchSessionsQuery, R
         var dtos = sessions.Select(s =>
         {
             string? title = null;
+            Dictionary<string, object>? settings = null;
+            List<string>? tags = null;
             if (!string.IsNullOrEmpty(s.MetaData))
             {
                 try
                 {
-                    var metadata = JsonSerializer.Deserialize<Dictionary<string, object>>(s.MetaData);
-                    if (metadata?.TryGetValue("title", out var t) == true)
-                        title = t?.ToString();
+                    var md = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(s.MetaData);
+                    if (md != null)
+                    {
+                        if (md.TryGetValue("title", out var titleEl))
+                            title = titleEl.GetString();
+                        settings = md.Where(kv => kv.Key != "tags" && kv.Key != "title")
+                            .ToDictionary(kv => kv.Key, kv => (object)kv.Value);
+                        if (md.TryGetValue("tags", out var tagsEl) && tagsEl.ValueKind == JsonValueKind.Array)
+                            tags = tagsEl.EnumerateArray().Select(e => e.GetString() ?? "").ToList();
+                    }
                 }
                 catch { }
             }
 
+            var isDeleted = s.PersonaDeletedAt != null || s.Persona?.Status == PersonaStatus.Archived;
+
             return new ChatSessionDto(
-                s.Id, s.UserId, s.PersonaId, s.PersonaName, s.Persona?.ImagePath,
+                s.Id, s.UserId, s.PersonaId, s.PersonaName,
+                isDeleted ? s.DeletedPersonaImage : s.Persona?.ImagePath,
                 title, s.Status.ToString(), s.IsPinned, s.MessageCount, null,
-                s.CreatedAt, s.LastMessageAt, s.UpdatedAt);
+                s.CreatedAt, s.LastMessageAt, s.UpdatedAt, isDeleted,
+                s.DeletedPersonaName, s.DeletedPersonaImage, s.PersonaDeletedAt,
+                settings, tags);
         }).ToList();
 
         return Result<ChatSessionSearchDto>.Success(new ChatSessionSearchDto(

@@ -18,13 +18,17 @@ using AiPersona.Infrastructure;
 var possibleEnvPaths = new[]
 {
     Path.Combine(Directory.GetCurrentDirectory(), ".env"),
+    Path.Combine(Directory.GetCurrentDirectory(), "..", ".env"),
     Path.Combine(Directory.GetCurrentDirectory(), "..", "..", ".env"),
+    Path.Combine(Directory.GetCurrentDirectory(), "..", "..", "..", ".env"),
+    Path.Combine(AppContext.BaseDirectory, ".env"),
     Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".env"),
 };
 
 var envFilePath = possibleEnvPaths.FirstOrDefault(File.Exists);
 if (envFilePath != null)
 {
+    Console.WriteLine($"[ENV] Loading environment from: {Path.GetFullPath(envFilePath)}");
     foreach (var line in File.ReadAllLines(envFilePath))
     {
         if (string.IsNullOrWhiteSpace(line) || line.StartsWith('#'))
@@ -36,6 +40,12 @@ if (envFilePath != null)
             Environment.SetEnvironmentVariable(parts[0].Trim(), parts[1].Trim());
         }
     }
+}
+else
+{
+    Console.WriteLine("[ENV] WARNING: No .env file found! Checked paths:");
+    foreach (var p in possibleEnvPaths)
+        Console.WriteLine($"  - {Path.GetFullPath(p)}");
 }
 
 // Configure Serilog
@@ -109,17 +119,18 @@ try
     });
 
     // Configure JWT Authentication
-    var jwtSecretKey = builder.Configuration["Jwt:SecretKey"]
-        ?? Environment.GetEnvironmentVariable("JWT_SECRET_KEY")
-        ?? throw new InvalidOperationException("JWT_SECRET_KEY is not configured");
+    var jwtSecretKey = !string.IsNullOrEmpty(builder.Configuration["Jwt:SecretKey"])
+        ? builder.Configuration["Jwt:SecretKey"]!
+        : Environment.GetEnvironmentVariable("JWT_SECRET_KEY")
+          ?? throw new InvalidOperationException("JWT_SECRET_KEY is not configured");
 
-    var jwtIssuer = builder.Configuration["Jwt:Issuer"]
-        ?? Environment.GetEnvironmentVariable("JWT_ISSUER")
-        ?? "AiPersona";
+    var jwtIssuer = !string.IsNullOrEmpty(builder.Configuration["Jwt:Issuer"])
+        ? builder.Configuration["Jwt:Issuer"]!
+        : Environment.GetEnvironmentVariable("JWT_ISSUER") ?? "AiPersona";
 
-    var jwtAudience = builder.Configuration["Jwt:Audience"]
-        ?? Environment.GetEnvironmentVariable("JWT_AUDIENCE")
-        ?? "AiPersonaApp";
+    var jwtAudience = !string.IsNullOrEmpty(builder.Configuration["Jwt:Audience"])
+        ? builder.Configuration["Jwt:Audience"]!
+        : Environment.GetEnvironmentVariable("JWT_AUDIENCE") ?? "AiPersonaApp";
 
     builder.Services.AddAuthentication(options =>
     {
@@ -255,6 +266,47 @@ try
 
     var port = Environment.GetEnvironmentVariable("API_PORT") ?? "8001";
     app.Urls.Add($"http://0.0.0.0:{port}");
+
+    // Check for --seed-personas CLI argument or SEED_PERSONAS env var
+    var shouldSeedPersonas = args.Contains("--seed-personas") ||
+                              Environment.GetEnvironmentVariable("SEED_PERSONAS") == "true";
+
+    if (shouldSeedPersonas)
+    {
+        Log.Information("Running persona seeder...");
+        using var scope = app.Services.CreateScope();
+        var seeder = scope.ServiceProvider.GetRequiredService<AiPersona.Infrastructure.Services.IPersonaSeederService>();
+
+        try
+        {
+            var result = await seeder.SeedPersonasAsync();
+            Log.Information("Seeding completed: {Created} created, {Updated} updated, {Skipped} skipped, {Errors} errors",
+                result.Created, result.Updated, result.Skipped, result.Errors.Count);
+
+            if (result.Errors.Count > 0)
+            {
+                foreach (var error in result.Errors)
+                {
+                    Log.Warning("Seeding error: {Error}", error);
+                }
+            }
+
+            // Exit after seeding if only seeding was requested
+            if (args.Contains("--seed-only"))
+            {
+                Log.Information("Seed-only mode, exiting...");
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Failed to seed personas");
+            if (args.Contains("--seed-only"))
+            {
+                throw;
+            }
+        }
+    }
 
     Log.Information("AiPersona API started on port {Port}", port);
 

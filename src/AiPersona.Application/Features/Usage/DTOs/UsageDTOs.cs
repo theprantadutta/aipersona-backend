@@ -2,9 +2,9 @@ namespace AiPersona.Application.Features.Usage.DTOs;
 
 public record CurrentUsageDto(
     int MessagesToday,
-    int MessageLimit,
+    int MessagesLimit,  // Changed from MessageLimit to match Flutter
     int PersonaCount,
-    int PersonaLimit,
+    int PersonasLimit,  // Changed from PersonaLimit to match Flutter
     long StorageUsedBytes,
     long StorageLimitBytes,
     int ConversationHistoryDays,

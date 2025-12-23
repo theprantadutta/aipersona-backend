@@ -76,13 +76,33 @@ public class GetSessionsQueryHandler : IRequestHandler<GetSessionsQuery, Result<
             var lastMsg = lastMessages.TryGetValue(s.Id, out var msg) ? msg : null;
             var isDeleted = s.PersonaDeletedAt != null || s.Persona?.Status == PersonaStatus.Archived;
 
+            // Parse settings and tags from metadata
+            Dictionary<string, object>? settings = null;
+            List<string>? tags = null;
+            if (!string.IsNullOrEmpty(s.MetaData))
+            {
+                try
+                {
+                    var md = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(s.MetaData);
+                    if (md != null)
+                    {
+                        settings = md.Where(kv => kv.Key != "tags" && kv.Key != "title")
+                            .ToDictionary(kv => kv.Key, kv => (object)kv.Value);
+                        if (md.TryGetValue("tags", out var tagsEl) && tagsEl.ValueKind == JsonValueKind.Array)
+                            tags = tagsEl.EnumerateArray().Select(e => e.GetString() ?? "").ToList();
+                    }
+                }
+                catch { }
+            }
+
             return new ChatSessionDto(
                 s.Id, s.UserId, s.PersonaId, s.PersonaName,
                 isDeleted ? s.DeletedPersonaImage : s.Persona?.ImagePath,
                 title, s.Status.ToString(), s.IsPinned, s.MessageCount,
                 lastMsg?.Substring(0, Math.Min(lastMsg.Length, 200)),
                 s.CreatedAt, s.LastMessageAt, s.UpdatedAt, isDeleted,
-                s.DeletedPersonaName, s.DeletedPersonaImage);
+                s.DeletedPersonaName, s.DeletedPersonaImage, s.PersonaDeletedAt,
+                settings, tags);
         }).ToList();
 
         return Result<ChatSessionListDto>.Success(new ChatSessionListDto(dtos, total, request.Page, request.PageSize));

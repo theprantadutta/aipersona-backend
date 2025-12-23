@@ -45,8 +45,9 @@ public class GetSessionQueryHandler : IRequestHandler<GetSessionQuery, Result<Ch
                 .ToListAsync(cancellationToken);
 
             messages = msgs.Select(m => new ChatMessageDto(
-                m.Id, m.SessionId, m.SenderType.ToString(), m.Text,
-                m.MessageType.ToString(), m.TokensUsed, m.CreatedAt)).ToList();
+                m.Id, m.SessionId, m.SenderId, m.SenderType.ToString(), m.Text,
+                m.MessageType.ToString(), m.TokensUsed, m.CreatedAt,
+                ParseMetadata(m.MetaData))).ToList();
         }
 
         string? title = null;
@@ -65,5 +66,18 @@ public class GetSessionQueryHandler : IRequestHandler<GetSessionQuery, Result<Ch
             session.Id, session.UserId, session.PersonaId, session.PersonaName,
             session.Persona?.ImagePath, title, session.Status.ToString(), session.IsPinned,
             session.MessageCount, session.CreatedAt, session.LastMessageAt, session.UpdatedAt, messages));
+    }
+
+    private static Dictionary<string, object>? ParseMetadata(string? json)
+    {
+        if (string.IsNullOrEmpty(json)) return null;
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, object>>(json);
+        }
+        catch
+        {
+            return null;
+        }
     }
 }

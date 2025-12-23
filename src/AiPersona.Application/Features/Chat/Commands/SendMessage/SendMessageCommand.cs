@@ -57,27 +57,35 @@ public class SendMessageCommandHandler : IRequestHandler<SendMessageCommand, Res
         if (session.Persona == null)
             return Result<SendMessageResponseDto>.Failure("Persona not found", 404);
 
-        // Get conversation history
-        var history = await _context.ChatMessages
-            .Where(m => m.SessionId == session.Id)
-            .OrderBy(m => m.CreatedAt)
-            .Take(20)
-            .ToListAsync(cancellationToken);
+        // Check if this is a greeting request (persona introduces themselves)
+        var isGreeting = request.Message.Trim() == "[GREETING]";
+        var actualMessage = isGreeting
+            ? "Please introduce yourself in character. Give a brief, engaging greeting that shows your personality."
+            : request.Message;
 
-        // Create user message
+        // Get conversation history (empty for greetings - it's the first interaction)
+        var history = isGreeting
+            ? new List<ChatMessage>()
+            : await _context.ChatMessages
+                .Where(m => m.SessionId == session.Id)
+                .OrderBy(m => m.CreatedAt)
+                .Take(20)
+                .ToListAsync(cancellationToken);
+
+        // Create user message (hidden system message for greetings)
         var userMessage = new ChatMessage
         {
             SessionId = session.Id,
             SenderType = SenderType.User,
-            Text = request.Message,
-            MessageType = MessageType.Text,
+            Text = isGreeting ? "[System: User opened chat]" : request.Message,
+            MessageType = isGreeting ? MessageType.System : MessageType.Text,
             CreatedAt = _dateTime.UtcNow
         };
         _context.ChatMessages.Add(userMessage);
 
         // Generate AI response
         var response = await _geminiService.GenerateResponseAsync(
-            session.Persona, history, request.Message, cancellationToken);
+            session.Persona, history, actualMessage, cancellationToken);
 
         // Create AI message
         var aiMessage = new ChatMessage
@@ -99,9 +107,11 @@ public class SendMessageCommandHandler : IRequestHandler<SendMessageCommand, Res
         await _context.SaveChangesAsync(cancellationToken);
 
         return Result<SendMessageResponseDto>.Success(new SendMessageResponseDto(
-            new ChatMessageDto(userMessage.Id, userMessage.SessionId, userMessage.SenderType.ToString(),
-                userMessage.Text, userMessage.MessageType.ToString(), userMessage.TokensUsed, userMessage.CreatedAt),
-            new ChatMessageDto(aiMessage.Id, aiMessage.SessionId, aiMessage.SenderType.ToString(),
-                aiMessage.Text, aiMessage.MessageType.ToString(), aiMessage.TokensUsed, aiMessage.CreatedAt)));
+            new ChatMessageDto(userMessage.Id, userMessage.SessionId, _currentUser.UserId,
+                userMessage.SenderType.ToString(), userMessage.Text, userMessage.MessageType.ToString(),
+                userMessage.TokensUsed, userMessage.CreatedAt),
+            new ChatMessageDto(aiMessage.Id, aiMessage.SessionId, null,
+                aiMessage.SenderType.ToString(), aiMessage.Text, aiMessage.MessageType.ToString(),
+                aiMessage.TokensUsed, aiMessage.CreatedAt)));
     }
 }

@@ -43,6 +43,8 @@ public class GetCurrentUserQueryHandler : IRequestHandler<GetCurrentUserQuery, R
             user.EmailVerified,
             user.AuthProvider.ToString(),
             user.CreatedAt,
-            user.LastLogin));
+            user.LastLogin,
+            user.IsPremium,
+            user.SubscriptionExpiresAt));
     }
 }

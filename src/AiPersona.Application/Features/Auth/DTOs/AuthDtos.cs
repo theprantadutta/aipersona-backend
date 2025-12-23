@@ -16,7 +16,9 @@ public record UserDto(
     bool EmailVerified,
     string? AuthProvider,
     DateTime CreatedAt,
-    DateTime? LastLogin);
+    DateTime? LastLogin,
+    bool IsPremium,
+    DateTime? SubscriptionExpiresAt);
 
 public record AuthProvidersDto(
     List<string> Providers,

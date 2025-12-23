@@ -69,6 +69,6 @@ public class CreateSessionCommandHandler : IRequestHandler<CreateSessionCommand,
             session.Id, session.UserId, session.PersonaId, session.PersonaName,
             persona.ImagePath, null, session.Status.ToString(), session.IsPinned,
             session.MessageCount, null, session.CreatedAt, session.LastMessageAt,
-            session.UpdatedAt));
+            session.UpdatedAt, false, null, null, null, null, null));
     }
 }

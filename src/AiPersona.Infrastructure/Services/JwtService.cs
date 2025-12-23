@@ -18,13 +18,24 @@ public class JwtService : IJwtService
 
     public JwtService(IConfiguration configuration)
     {
-        _secretKey = configuration["JwtSettings:SecretKey"]
-            ?? Environment.GetEnvironmentVariable("JWT_SECRET_KEY")
-            ?? throw new InvalidOperationException("JWT secret key is not configured");
+        // Use same config keys as Program.cs, with proper empty string handling
+        _secretKey = !string.IsNullOrEmpty(configuration["Jwt:SecretKey"])
+            ? configuration["Jwt:SecretKey"]!
+            : Environment.GetEnvironmentVariable("JWT_SECRET_KEY")
+              ?? throw new InvalidOperationException("JWT secret key is not configured");
 
-        _issuer = configuration["JwtSettings:Issuer"] ?? "AiPersonaApi";
-        _audience = configuration["JwtSettings:Audience"] ?? "AiPersonaApp";
-        _expiryMinutes = int.Parse(configuration["JwtSettings:ExpiryMinutes"] ?? "10080"); // Default 7 days
+        _issuer = !string.IsNullOrEmpty(configuration["Jwt:Issuer"])
+            ? configuration["Jwt:Issuer"]!
+            : Environment.GetEnvironmentVariable("JWT_ISSUER") ?? "AiPersona";
+
+        _audience = !string.IsNullOrEmpty(configuration["Jwt:Audience"])
+            ? configuration["Jwt:Audience"]!
+            : Environment.GetEnvironmentVariable("JWT_AUDIENCE") ?? "AiPersonaApp";
+
+        var expiryConfig = configuration["Jwt:AccessTokenExpireMinutes"];
+        _expiryMinutes = !string.IsNullOrEmpty(expiryConfig)
+            ? int.Parse(expiryConfig)
+            : 10080; // Default 7 days
     }
 
     public string GenerateAccessToken(User user)

@@ -30,22 +30,40 @@ public class GeminiService : IGeminiService
         _httpClient = httpClient;
         _logger = logger;
 
-        _apiKey = configuration["Gemini:ApiKey"]
-            ?? Environment.GetEnvironmentVariable("GEMINI_API_KEY")
-            ?? throw new InvalidOperationException("Gemini API key is not configured");
+        // Use !string.IsNullOrEmpty to handle empty strings from config
+        var geminiApiKey = configuration["Gemini:ApiKey"];
+        _apiKey = !string.IsNullOrEmpty(geminiApiKey)
+            ? geminiApiKey
+            : Environment.GetEnvironmentVariable("GEMINI_API_KEY")
+              ?? throw new InvalidOperationException("Gemini API key is not configured");
 
-        _model = configuration["Gemini:Model"]
-            ?? Environment.GetEnvironmentVariable("GEMINI_MODEL")
-            ?? "gemini-2.0-flash-exp";
+        var geminiModel = configuration["Gemini:Model"];
+        _model = !string.IsNullOrEmpty(geminiModel)
+            ? geminiModel
+            : Environment.GetEnvironmentVariable("GEMINI_MODEL") ?? "gemini-2.0-flash-exp";
 
         _maxTokens = int.Parse(configuration["AiDefaults:MaxTokens"] ?? "8192");
         _temperature = double.Parse(configuration["AiDefaults:Temperature"] ?? "0.7");
         _maxConversationHistory = int.Parse(configuration["AiDefaults:MaxConversationHistory"] ?? "20");
 
-        // Freeway fallback
-        _freewayApiUrl = configuration["Freeway:ApiUrl"] ?? Environment.GetEnvironmentVariable("FREEWAY_API_URL");
-        _freewayApiKey = configuration["Freeway:ApiKey"] ?? Environment.GetEnvironmentVariable("FREEWAY_API_KEY");
-        _freewayModel = configuration["Freeway:Model"] ?? Environment.GetEnvironmentVariable("FREEWAY_MODEL");
+        // Freeway fallback - handle empty strings from config
+        var freewayUrl = configuration["Freeway:ApiUrl"];
+        _freewayApiUrl = !string.IsNullOrEmpty(freewayUrl)
+            ? freewayUrl
+            : Environment.GetEnvironmentVariable("FREEWAY_API_URL");
+
+        var freewayKey = configuration["Freeway:ApiKey"];
+        _freewayApiKey = !string.IsNullOrEmpty(freewayKey)
+            ? freewayKey
+            : Environment.GetEnvironmentVariable("FREEWAY_API_KEY");
+
+        var freewayModel = configuration["Freeway:Model"];
+        _freewayModel = !string.IsNullOrEmpty(freewayModel)
+            ? freewayModel
+            : Environment.GetEnvironmentVariable("FREEWAY_MODEL");
+
+        _logger.LogInformation("GeminiService initialized. Freeway fallback configured: {HasFreeway}",
+            !string.IsNullOrEmpty(_freewayApiUrl) && !string.IsNullOrEmpty(_freewayApiKey));
     }
 
     public async Task<GeminiResponse> GenerateResponseAsync(
@@ -63,11 +81,24 @@ public class GeminiService : IGeminiService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Gemini API call failed, attempting Freeway fallback");
-            if (!string.IsNullOrEmpty(_freewayApiUrl) && !string.IsNullOrEmpty(_freewayApiKey))
+            var hasFreewayConfig = !string.IsNullOrEmpty(_freewayApiUrl) && !string.IsNullOrEmpty(_freewayApiKey);
+            _logger.LogWarning(ex, "Gemini API call failed. Freeway fallback available: {HasFreeway}", hasFreewayConfig);
+
+            if (hasFreewayConfig)
             {
-                return await CallFreewayApiAsync(systemPrompt, messages, cancellationToken);
+                _logger.LogInformation("Attempting Freeway API fallback to {Url}", _freewayApiUrl);
+                try
+                {
+                    return await CallFreewayApiAsync(systemPrompt, messages, cancellationToken);
+                }
+                catch (Exception freewayEx)
+                {
+                    _logger.LogError(freewayEx, "Freeway API fallback also failed");
+                    throw;
+                }
             }
+
+            _logger.LogError("No Freeway fallback configured. Set FREEWAY_API_URL and FREEWAY_API_KEY environment variables.");
             throw;
         }
     }
@@ -182,7 +213,8 @@ public class GeminiService : IGeminiService
         List<(string role, string content)> messages,
         CancellationToken cancellationToken)
     {
-        var url = _freewayApiUrl!;
+        // Ensure we have the full endpoint URL
+        var url = _freewayApiUrl!.TrimEnd('/') + "/chat/completions";
 
         var openAiMessages = new List<object>
         {
@@ -206,7 +238,7 @@ public class GeminiService : IGeminiService
         {
             Content = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json")
         };
-        request.Headers.Add("Authorization", $"Bearer {_freewayApiKey}");
+        request.Headers.Add("X-Api-Key", _freewayApiKey);
 
         var response = await _httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();

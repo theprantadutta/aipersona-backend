@@ -16,7 +16,10 @@ public record ChatSessionDto(
     DateTime UpdatedAt,
     bool IsPersonaDeleted = false,
     string? DeletedPersonaName = null,
-    string? DeletedPersonaImage = null);
+    string? DeletedPersonaImage = null,
+    DateTime? PersonaDeletedAt = null,
+    Dictionary<string, object>? Settings = null,
+    List<string>? Tags = null);
 
 public record ChatSessionDetailDto(
     Guid Id,
@@ -50,11 +53,13 @@ public record ChatSessionSearchDto(
 public record ChatMessageDto(
     Guid Id,
     Guid SessionId,
+    Guid? SenderId,
     string SenderType,
     string Text,
     string? MessageType,
     int? TokensUsed,
     DateTime CreatedAt,
+    Dictionary<string, object>? Metadata = null,
     List<MessageAttachmentDto>? Attachments = null);
 
 public record MessageAttachmentDto(

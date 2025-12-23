@@ -8,6 +8,7 @@ using AiPersona.Application.Features.Admin.Queries.GetUsers;
 using AiPersona.Application.Features.Admin.Queries.GetUserDetails;
 using AiPersona.Application.Features.Admin.Queries.GetDashboard;
 using AiPersona.Application.Features.Admin.Queries.GetReports;
+using AiPersona.Infrastructure.Services;
 
 namespace AiPersona.Api.Controllers.V1;
 
@@ -105,5 +106,28 @@ public class AdminController : BaseApiController
         command = command with { ReportId = reportId };
         var result = await Mediator.Send(command);
         return HandleResult(result);
+    }
+
+    /// <summary>
+    /// Seed personas from JSON file
+    /// This will create or update personas from personas_data.json,
+    /// fetching Wikipedia images and uploading to FileRunner.
+    /// </summary>
+    [HttpPost("seed-personas")]
+    public async Task<ActionResult> SeedPersonas(
+        [FromServices] IPersonaSeederService seederService,
+        CancellationToken cancellationToken)
+    {
+        var result = await seederService.SeedPersonasAsync(cancellationToken);
+        return Ok(new
+        {
+            message = "Persona seeding completed",
+            total_processed = result.TotalProcessed,
+            images_found = result.ImagesFound,
+            created = result.Created,
+            updated = result.Updated,
+            skipped = result.Skipped,
+            errors = result.Errors
+        });
     }
 }

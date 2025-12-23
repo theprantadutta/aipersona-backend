@@ -63,12 +63,36 @@ public class UpdateSessionCommandHandler : IRequestHandler<UpdateSessionCommand,
         await _context.SaveChangesAsync(cancellationToken);
 
         string? title = null;
-        if (metadata.TryGetValue("title", out var t))
-            title = t?.ToString();
+        Dictionary<string, object>? settings = null;
+        List<string>? tags = null;
+
+        // Re-parse metadata for response
+        if (!string.IsNullOrEmpty(session.MetaData))
+        {
+            try
+            {
+                var md = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(session.MetaData);
+                if (md != null)
+                {
+                    if (md.TryGetValue("title", out var titleEl))
+                        title = titleEl.GetString();
+                    settings = md.Where(kv => kv.Key != "tags" && kv.Key != "title")
+                        .ToDictionary(kv => kv.Key, kv => (object)kv.Value);
+                    if (md.TryGetValue("tags", out var tagsEl) && tagsEl.ValueKind == JsonValueKind.Array)
+                        tags = tagsEl.EnumerateArray().Select(e => e.GetString() ?? "").ToList();
+                }
+            }
+            catch { }
+        }
+
+        var isDeleted = session.PersonaDeletedAt != null;
 
         return Result<ChatSessionDto>.Success(new ChatSessionDto(
             session.Id, session.UserId, session.PersonaId, session.PersonaName,
-            session.Persona?.ImagePath, title, session.Status.ToString(), session.IsPinned,
-            session.MessageCount, null, session.CreatedAt, session.LastMessageAt, session.UpdatedAt));
+            isDeleted ? session.DeletedPersonaImage : session.Persona?.ImagePath,
+            title, session.Status.ToString(), session.IsPinned, session.MessageCount, null,
+            session.CreatedAt, session.LastMessageAt, session.UpdatedAt, isDeleted,
+            session.DeletedPersonaName, session.DeletedPersonaImage, session.PersonaDeletedAt,
+            settings, tags));
     }
 }

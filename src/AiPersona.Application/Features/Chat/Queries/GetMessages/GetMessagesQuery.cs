@@ -1,3 +1,4 @@
+using System.Text.Json;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using AiPersona.Application.Common;
@@ -8,8 +9,8 @@ namespace AiPersona.Application.Features.Chat.Queries.GetMessages;
 
 public record GetMessagesQuery(
     Guid SessionId,
-    int Page = 1,
-    int PageSize = 50,
+    int Skip = 0,
+    int Limit = 50,
     DateTime? Before = null,
     DateTime? After = null) : IRequest<Result<ChatMessageListDto>>;
 
@@ -47,19 +48,39 @@ public class GetMessagesQueryHandler : IRequestHandler<GetMessagesQuery, Result<
             query = query.Where(m => m.CreatedAt > request.After);
 
         var total = await query.CountAsync(cancellationToken);
-        var skip = (request.Page - 1) * request.PageSize;
+
+        // Ensure skip is not negative
+        var skip = Math.Max(0, request.Skip);
+        var limit = Math.Max(1, Math.Min(request.Limit, 200)); // Cap at 200
 
         var messages = await query
             .OrderBy(m => m.CreatedAt)
             .Skip(skip)
-            .Take(request.PageSize)
+            .Take(limit)
             .ToListAsync(cancellationToken);
 
         var dtos = messages.Select(m => new ChatMessageDto(
-            m.Id, m.SessionId, m.SenderType.ToString(), m.Text,
-            m.MessageType.ToString(), m.TokensUsed, m.CreatedAt)).ToList();
+            m.Id, m.SessionId, m.SenderId, m.SenderType.ToString(), m.Text,
+            m.MessageType.ToString(), m.TokensUsed, m.CreatedAt,
+            ParseMetadata(m.MetaData))).ToList();
+
+        // Calculate page info for response
+        var page = skip / limit + 1;
 
         return Result<ChatMessageListDto>.Success(new ChatMessageListDto(
-            dtos, total, request.Page, request.PageSize, request.Before, request.After));
+            dtos, total, page, limit, request.Before, request.After));
+    }
+
+    private static Dictionary<string, object>? ParseMetadata(string? json)
+    {
+        if (string.IsNullOrEmpty(json)) return null;
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, object>>(json);
+        }
+        catch
+        {
+            return null;
+        }
     }
 }
