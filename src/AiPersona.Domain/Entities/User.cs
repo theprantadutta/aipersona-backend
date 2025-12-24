@@ -43,6 +43,10 @@ public class User : BaseEntity
     public DateTime? GracePeriodEndsAt { get; set; }
     public string? GooglePlayPurchaseToken { get; set; }
 
+    // Refresh Token
+    public string? RefreshTokenHash { get; set; }
+    public DateTime? RefreshTokenExpiresAt { get; set; }
+
     // Navigation properties
     public ICollection<Persona> Personas { get; set; } = new List<Persona>();
     public ICollection<ChatSession> ChatSessions { get; set; } = new List<ChatSession>();

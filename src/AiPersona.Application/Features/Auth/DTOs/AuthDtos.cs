@@ -27,5 +27,8 @@ public record AuthProvidersDto(
 
 public record TokenDto(
     string AccessToken,
+    string RefreshToken,
     string TokenType,
-    Guid UserId);
+    Guid UserId,
+    DateTime AccessTokenExpiresAt,
+    DateTime RefreshTokenExpiresAt);

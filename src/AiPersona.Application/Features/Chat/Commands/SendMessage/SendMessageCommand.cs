@@ -59,18 +59,68 @@ public class SendMessageCommandHandler : IRequestHandler<SendMessageCommand, Res
 
         // Check if this is a greeting request (persona introduces themselves)
         var isGreeting = request.Message.Trim() == "[GREETING]";
-        var actualMessage = isGreeting
-            ? "Please introduce yourself in character. Give a brief, engaging greeting that shows your personality."
-            : request.Message;
 
-        // Get conversation history (empty for greetings - it's the first interaction)
-        var history = isGreeting
-            ? new List<ChatMessage>()
-            : await _context.ChatMessages
+        string responseText;
+        int tokensUsed = 0;
+        bool isAiFallback = false;
+        string? aiErrorType = null;
+
+        if (isGreeting)
+        {
+            // Check if we already have a greeting stored for this user+persona
+            var existingGreeting = await _context.PersonaGreetings
+                .FirstOrDefaultAsync(pg => pg.UserId == _currentUser.UserId && pg.PersonaId == session.Persona.Id, cancellationToken);
+
+            if (existingGreeting != null)
+            {
+                // Use the stored greeting - no AI call needed
+                responseText = existingGreeting.GreetingText;
+                tokensUsed = existingGreeting.TokensUsed;
+            }
+            else
+            {
+                // Generate a new greeting via AI
+                var greetingPrompt = "Please introduce yourself in character. Give a brief, engaging greeting that shows your personality.";
+                var response = await _geminiService.GenerateResponseAsync(
+                    session.Persona, new List<ChatMessage>(), greetingPrompt, cancellationToken);
+
+                responseText = response.Text;
+                tokensUsed = response.TokensUsed;
+                isAiFallback = response.IsFallback;
+                aiErrorType = response.ErrorType;
+
+                // Only store the greeting if it's not a fallback (actual AI response)
+                if (!response.IsFallback)
+                {
+                    var newGreeting = new PersonaGreeting
+                    {
+                        UserId = _currentUser.UserId.Value,
+                        PersonaId = session.Persona.Id,
+                        GreetingText = responseText,
+                        TokensUsed = tokensUsed,
+                        CreatedAt = _dateTime.UtcNow
+                    };
+                    _context.PersonaGreetings.Add(newGreeting);
+                }
+            }
+        }
+        else
+        {
+            // Regular message - get conversation history and generate response
+            var history = await _context.ChatMessages
                 .Where(m => m.SessionId == session.Id)
                 .OrderBy(m => m.CreatedAt)
                 .Take(20)
                 .ToListAsync(cancellationToken);
+
+            var response = await _geminiService.GenerateResponseAsync(
+                session.Persona, history, request.Message, cancellationToken);
+
+            responseText = response.Text;
+            tokensUsed = response.TokensUsed;
+            isAiFallback = response.IsFallback;
+            aiErrorType = response.ErrorType;
+        }
 
         // Create user message (hidden system message for greetings)
         var userMessage = new ChatMessage
@@ -83,18 +133,14 @@ public class SendMessageCommandHandler : IRequestHandler<SendMessageCommand, Res
         };
         _context.ChatMessages.Add(userMessage);
 
-        // Generate AI response
-        var response = await _geminiService.GenerateResponseAsync(
-            session.Persona, history, actualMessage, cancellationToken);
-
         // Create AI message
         var aiMessage = new ChatMessage
         {
             SessionId = session.Id,
             SenderType = SenderType.Ai,
-            Text = response.Text,
+            Text = responseText,
             MessageType = MessageType.Text,
-            TokensUsed = response.TokensUsed,
+            TokensUsed = tokensUsed,
             CreatedAt = _dateTime.UtcNow
         };
         _context.ChatMessages.Add(aiMessage);
@@ -112,6 +158,8 @@ public class SendMessageCommandHandler : IRequestHandler<SendMessageCommand, Res
                 userMessage.TokensUsed, userMessage.CreatedAt),
             new ChatMessageDto(aiMessage.Id, aiMessage.SessionId, null,
                 aiMessage.SenderType.ToString(), aiMessage.Text, aiMessage.MessageType.ToString(),
-                aiMessage.TokensUsed, aiMessage.CreatedAt)));
+                aiMessage.TokensUsed, aiMessage.CreatedAt),
+            isAiFallback,
+            aiErrorType));
     }
 }

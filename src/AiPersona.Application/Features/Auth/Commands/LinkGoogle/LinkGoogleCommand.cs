@@ -69,6 +69,11 @@ public class LinkGoogleCommandHandler : IRequestHandler<LinkGoogleCommand, Resul
         if (existingFirebaseUser != null)
             return Result<TokenDto>.Failure("This Google account is already linked to another user", 409);
 
+        // Generate refresh token
+        var refreshToken = _jwtService.GenerateRefreshToken();
+        var refreshExpireDays = _jwtService.GetRefreshTokenExpireDays();
+        var accessExpireMinutes = _jwtService.GetAccessTokenExpireMinutes();
+
         // Link the accounts
         user.FirebaseUid = firebaseUser.Uid;
         user.GoogleId = firebaseUser.Uid;
@@ -78,10 +83,18 @@ public class LinkGoogleCommandHandler : IRequestHandler<LinkGoogleCommand, Resul
         user.AuthProvider = firebaseUser.Provider == "google.com" ? AuthProvider.Google : AuthProvider.Firebase;
         user.LastLogin = _dateTime.UtcNow;
         user.UpdatedAt = _dateTime.UtcNow;
+        user.RefreshTokenHash = _jwtService.HashRefreshToken(refreshToken);
+        user.RefreshTokenExpiresAt = _dateTime.UtcNow.AddDays(refreshExpireDays);
 
         await _context.SaveChangesAsync(cancellationToken);
 
-        var token = _jwtService.GenerateAccessToken(user);
-        return Result<TokenDto>.Success(new TokenDto(token, "bearer", user.Id));
+        var accessToken = _jwtService.GenerateAccessToken(user);
+        return Result<TokenDto>.Success(new TokenDto(
+            accessToken,
+            refreshToken,
+            "bearer",
+            user.Id,
+            _dateTime.UtcNow.AddMinutes(accessExpireMinutes),
+            user.RefreshTokenExpiresAt.Value));
     }
 }

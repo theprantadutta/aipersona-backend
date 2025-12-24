@@ -51,11 +51,25 @@ public class LoginCommandHandler : IRequestHandler<LoginCommand, Result<TokenDto
         if (!user.IsActive)
             return Result<TokenDto>.Failure("Account is suspended", 403);
 
+        // Generate tokens
+        var accessToken = _jwtService.GenerateAccessToken(user);
+        var refreshToken = _jwtService.GenerateRefreshToken();
+        var refreshExpireDays = _jwtService.GetRefreshTokenExpireDays();
+        var accessExpireMinutes = _jwtService.GetAccessTokenExpireMinutes();
+
+        // Store refresh token hash
+        user.RefreshTokenHash = _jwtService.HashRefreshToken(refreshToken);
+        user.RefreshTokenExpiresAt = _dateTime.UtcNow.AddDays(refreshExpireDays);
         user.LastLogin = _dateTime.UtcNow;
+
         await _context.SaveChangesAsync(cancellationToken);
 
-        var token = _jwtService.GenerateAccessToken(user);
-
-        return Result<TokenDto>.Success(new TokenDto(token, "bearer", user.Id));
+        return Result<TokenDto>.Success(new TokenDto(
+            accessToken,
+            refreshToken,
+            "bearer",
+            user.Id,
+            _dateTime.UtcNow.AddMinutes(accessExpireMinutes),
+            user.RefreshTokenExpiresAt.Value));
     }
 }

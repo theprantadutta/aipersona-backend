@@ -15,6 +15,7 @@ public interface IApplicationDbContext
     DbSet<ChatSession> ChatSessions { get; }
     DbSet<ChatMessage> ChatMessages { get; }
     DbSet<MessageAttachment> MessageAttachments { get; }
+    DbSet<PersonaGreeting> PersonaGreetings { get; }
 
     // Subscription entities
     DbSet<SubscriptionEvent> SubscriptionEvents { get; }

@@ -15,6 +15,7 @@ public class JwtService : IJwtService
     private readonly string _issuer;
     private readonly string _audience;
     private readonly int _expiryMinutes;
+    private readonly int _refreshTokenExpireDays;
 
     public JwtService(IConfiguration configuration)
     {
@@ -35,7 +36,12 @@ public class JwtService : IJwtService
         var expiryConfig = configuration["Jwt:AccessTokenExpireMinutes"];
         _expiryMinutes = !string.IsNullOrEmpty(expiryConfig)
             ? int.Parse(expiryConfig)
-            : 10080; // Default 7 days
+            : 60; // Default 60 minutes
+
+        var refreshExpiryConfig = configuration["Jwt:RefreshTokenExpireDays"];
+        _refreshTokenExpireDays = !string.IsNullOrEmpty(refreshExpiryConfig)
+            ? int.Parse(refreshExpiryConfig)
+            : 90; // Default 90 days
     }
 
     public string GenerateAccessToken(User user)
@@ -75,6 +81,23 @@ public class JwtService : IJwtService
         rng.GetBytes(randomNumber);
         return Convert.ToBase64String(randomNumber);
     }
+
+    public string HashRefreshToken(string refreshToken)
+    {
+        var bytes = Encoding.UTF8.GetBytes(refreshToken);
+        var hash = SHA256.HashData(bytes);
+        return Convert.ToBase64String(hash);
+    }
+
+    public bool VerifyRefreshToken(string refreshToken, string hash)
+    {
+        var computedHash = HashRefreshToken(refreshToken);
+        return computedHash == hash;
+    }
+
+    public int GetRefreshTokenExpireDays() => _refreshTokenExpireDays;
+
+    public int GetAccessTokenExpireMinutes() => _expiryMinutes;
 
     public (Guid userId, string email)? ValidateToken(string token)
     {

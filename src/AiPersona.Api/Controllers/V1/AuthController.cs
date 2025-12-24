@@ -6,6 +6,8 @@ using AiPersona.Application.Features.Auth.Commands.FirebaseAuth;
 using AiPersona.Application.Features.Auth.Commands.LinkGoogle;
 using AiPersona.Application.Features.Auth.Commands.UnlinkGoogle;
 using AiPersona.Application.Features.Auth.Commands.UpdateProfile;
+using AiPersona.Application.Features.Auth.Commands.RefreshToken;
+using AiPersona.Application.Features.Auth.Commands.RevokeRefreshToken;
 using AiPersona.Application.Features.Auth.Queries.GetCurrentUser;
 using AiPersona.Application.Features.Auth.Queries.GetAuthProviders;
 
@@ -114,13 +116,24 @@ public class AuthController : BaseApiController
     }
 
     /// <summary>
-    /// Logout (client should delete token)
+    /// Refresh access token using refresh token
+    /// </summary>
+    [HttpPost("refresh")]
+    [AllowAnonymous]
+    public async Task<ActionResult> RefreshToken([FromBody] RefreshTokenCommand command)
+    {
+        var result = await Mediator.Send(command);
+        return HandleResult(result);
+    }
+
+    /// <summary>
+    /// Logout - invalidates refresh token
     /// </summary>
     [HttpPost("logout")]
     [Authorize]
-    public ActionResult Logout()
+    public async Task<ActionResult> Logout()
     {
-        // JWT tokens are stateless, so logout is handled client-side
-        return Ok(new { message = "Logged out successfully" });
+        var result = await Mediator.Send(new RevokeRefreshTokenCommand());
+        return HandleResult(result);
     }
 }

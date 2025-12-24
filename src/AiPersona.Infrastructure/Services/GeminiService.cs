@@ -25,6 +25,10 @@ public class GeminiService : IGeminiService
     private readonly string? _freewayApiKey;
     private readonly string? _freewayModel;
 
+    // Retry configuration
+    private const int MaxRetries = 3;
+    private static readonly int[] RetryDelaysMs = [1000, 2000, 4000];
+
     public GeminiService(HttpClient httpClient, IConfiguration configuration, ILogger<GeminiService> logger)
     {
         _httpClient = httpClient;
@@ -75,32 +79,95 @@ public class GeminiService : IGeminiService
         var systemPrompt = BuildSystemPrompt(persona);
         var messages = BuildMessages(conversationHistory, userMessage);
 
-        try
+        // Try Gemini API with retry logic for rate limit (429) errors
+        Exception? lastGeminiException = null;
+        string? errorType = null;
+        for (var attempt = 0; attempt < MaxRetries; attempt++)
         {
-            return await CallGeminiApiAsync(systemPrompt, messages, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            var hasFreewayConfig = !string.IsNullOrEmpty(_freewayApiUrl) && !string.IsNullOrEmpty(_freewayApiKey);
-            _logger.LogWarning(ex, "Gemini API call failed. Freeway fallback available: {HasFreeway}", hasFreewayConfig);
-
-            if (hasFreewayConfig)
+            try
             {
-                _logger.LogInformation("Attempting Freeway API fallback to {Url}", _freewayApiUrl);
-                try
+                return await CallGeminiApiAsync(systemPrompt, messages, cancellationToken);
+            }
+            catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+            {
+                lastGeminiException = ex;
+                errorType = "rate_limit";
+                if (attempt < MaxRetries - 1)
                 {
-                    return await CallFreewayApiAsync(systemPrompt, messages, cancellationToken);
-                }
-                catch (Exception freewayEx)
-                {
-                    _logger.LogError(freewayEx, "Freeway API fallback also failed");
-                    throw;
+                    var delay = RetryDelaysMs[attempt];
+                    _logger.LogWarning("Gemini API rate limited (429). Retry {Attempt}/{MaxRetries} after {Delay}ms",
+                        attempt + 1, MaxRetries, delay);
+                    await Task.Delay(delay, cancellationToken);
                 }
             }
-
-            _logger.LogError("No Freeway fallback configured. Set FREEWAY_API_URL and FREEWAY_API_KEY environment variables.");
-            throw;
+            catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+            {
+                lastGeminiException = ex;
+                errorType = "timeout";
+                _logger.LogWarning(ex, "Gemini API call timed out on attempt {Attempt}", attempt + 1);
+                break;
+            }
+            catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable)
+            {
+                lastGeminiException = ex;
+                errorType = "service_unavailable";
+                _logger.LogWarning(ex, "Gemini API service unavailable on attempt {Attempt}", attempt + 1);
+                break;
+            }
+            catch (Exception ex)
+            {
+                lastGeminiException = ex;
+                errorType = "unknown";
+                _logger.LogWarning(ex, "Gemini API call failed on attempt {Attempt}", attempt + 1);
+                break; // Don't retry non-429 errors
+            }
         }
+
+        // Try Freeway fallback
+        var hasFreewayConfig = !string.IsNullOrEmpty(_freewayApiUrl) && !string.IsNullOrEmpty(_freewayApiKey);
+        _logger.LogWarning(lastGeminiException, "Gemini API failed after retries. Freeway fallback available: {HasFreeway}", hasFreewayConfig);
+
+        if (hasFreewayConfig)
+        {
+            _logger.LogInformation("Attempting Freeway API fallback to {Url}", _freewayApiUrl);
+            try
+            {
+                return await CallFreewayApiAsync(systemPrompt, messages, cancellationToken);
+            }
+            catch (HttpRequestException freewayEx)
+            {
+                _logger.LogError(freewayEx, "Freeway API fallback failed. Status: {StatusCode}, URL: {Url}",
+                    freewayEx.StatusCode, _freewayApiUrl + "/chat/completions");
+
+                // Return a graceful fallback response instead of throwing
+                _logger.LogWarning("All AI APIs failed. Returning fallback response.");
+                return new GeminiResponse(
+                    "I apologize, but I'm having trouble connecting right now. Please try again in a moment.",
+                    TokensUsed: 0,
+                    IsFallback: true,
+                    ErrorType: errorType ?? "service_unavailable");
+            }
+            catch (Exception freewayEx)
+            {
+                _logger.LogError(freewayEx, "Freeway API fallback failed unexpectedly");
+
+                // Return a graceful fallback response
+                return new GeminiResponse(
+                    "I apologize, but I'm having trouble connecting right now. Please try again in a moment.",
+                    TokensUsed: 0,
+                    IsFallback: true,
+                    ErrorType: errorType ?? "unknown");
+            }
+        }
+
+        _logger.LogError("No Freeway fallback configured. Set FREEWAY_API_URL and FREEWAY_API_KEY environment variables.");
+
+        // Return graceful fallback instead of throwing
+        return new GeminiResponse(
+            "I apologize, but I'm temporarily unavailable. Please try again in a moment.",
+            TokensUsed: 0,
+            IsFallback: true,
+            ErrorType: errorType ?? "service_unavailable");
     }
 
     public async IAsyncEnumerable<string> StreamResponseAsync(

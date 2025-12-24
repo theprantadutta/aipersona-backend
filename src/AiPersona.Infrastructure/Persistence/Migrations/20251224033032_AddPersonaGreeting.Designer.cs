@@ -3,6 +3,7 @@ using System;
 using AiPersona.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace AiPersona.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20251224033032_AddPersonaGreeting")]
+    partial class AddPersonaGreeting
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1352,15 +1355,6 @@ namespace AiPersona.Infrastructure.Persistence.Migrations
                     b.Property<string>("ProfileImage")
                         .HasColumnType("text")
                         .HasColumnName("profile_image");
-
-                    b.Property<DateTime?>("RefreshTokenExpiresAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("refresh_token_expires_at");
-
-                    b.Property<string>("RefreshTokenHash")
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)")
-                        .HasColumnName("refresh_token_hash");
 
                     b.Property<DateTime?>("SubscriptionExpiresAt")
                         .HasColumnType("timestamp with time zone")

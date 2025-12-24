@@ -71,7 +71,9 @@ public record MessageAttachmentDto(
 
 public record SendMessageResponseDto(
     ChatMessageDto UserMessage,
-    ChatMessageDto AiMessage);
+    ChatMessageDto AiMessage,
+    bool IsAiFallback = false,
+    string? AiErrorType = null);
 
 public record ChatMessageListDto(
     List<ChatMessageDto> Messages,

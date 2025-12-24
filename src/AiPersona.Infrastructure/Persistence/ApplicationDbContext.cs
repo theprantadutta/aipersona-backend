@@ -20,6 +20,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<ChatSession> ChatSessions => Set<ChatSession>();
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
     public DbSet<MessageAttachment> MessageAttachments => Set<MessageAttachment>();
+    public DbSet<PersonaGreeting> PersonaGreetings => Set<PersonaGreeting>();
 
     // Subscription entities
     public DbSet<SubscriptionEvent> SubscriptionEvents => Set<SubscriptionEvent>();

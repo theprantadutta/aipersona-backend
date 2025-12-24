@@ -53,6 +53,11 @@ public class RegisterCommandHandler : IRequestHandler<RegisterCommand, Result<To
         if (existingUser != null)
             return Result<TokenDto>.Failure("Email already registered", 400);
 
+        // Generate refresh token
+        var refreshToken = _jwtService.GenerateRefreshToken();
+        var refreshExpireDays = _jwtService.GetRefreshTokenExpireDays();
+        var accessExpireMinutes = _jwtService.GetAccessTokenExpireMinutes();
+
         var user = new User
         {
             Email = request.Email.ToLower(),
@@ -63,7 +68,9 @@ public class RegisterCommandHandler : IRequestHandler<RegisterCommand, Result<To
             IsActive = true,
             EmailVerified = false,
             CreatedAt = _dateTime.UtcNow,
-            UpdatedAt = _dateTime.UtcNow
+            UpdatedAt = _dateTime.UtcNow,
+            RefreshTokenHash = _jwtService.HashRefreshToken(refreshToken),
+            RefreshTokenExpiresAt = _dateTime.UtcNow.AddDays(refreshExpireDays)
         };
 
         _context.Users.Add(user);
@@ -78,8 +85,14 @@ public class RegisterCommandHandler : IRequestHandler<RegisterCommand, Result<To
 
         await _context.SaveChangesAsync(cancellationToken);
 
-        var token = _jwtService.GenerateAccessToken(user);
+        var accessToken = _jwtService.GenerateAccessToken(user);
 
-        return Result<TokenDto>.Created(new TokenDto(token, "bearer", user.Id));
+        return Result<TokenDto>.Created(new TokenDto(
+            accessToken,
+            refreshToken,
+            "bearer",
+            user.Id,
+            _dateTime.UtcNow.AddMinutes(accessExpireMinutes),
+            user.RefreshTokenExpiresAt!.Value));
     }
 }

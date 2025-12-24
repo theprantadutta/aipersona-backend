@@ -53,11 +53,25 @@ public class FirebaseAuthCommandHandler : IRequestHandler<FirebaseAuthCommand, R
 
         if (user != null)
         {
+            // Generate tokens for existing user
+            var accessToken = _jwtService.GenerateAccessToken(user);
+            var refreshToken = _jwtService.GenerateRefreshToken();
+            var refreshExpireDays = _jwtService.GetRefreshTokenExpireDays();
+            var accessExpireMinutes = _jwtService.GetAccessTokenExpireMinutes();
+
+            user.RefreshTokenHash = _jwtService.HashRefreshToken(refreshToken);
+            user.RefreshTokenExpiresAt = _dateTime.UtcNow.AddDays(refreshExpireDays);
             user.LastLogin = _dateTime.UtcNow;
+
             await _context.SaveChangesAsync(cancellationToken);
 
-            var token = _jwtService.GenerateAccessToken(user);
-            return Result<TokenDto>.Success(new TokenDto(token, "bearer", user.Id));
+            return Result<TokenDto>.Success(new TokenDto(
+                accessToken,
+                refreshToken,
+                "bearer",
+                user.Id,
+                _dateTime.UtcNow.AddMinutes(accessExpireMinutes),
+                user.RefreshTokenExpiresAt.Value));
         }
 
         // Check if email already exists
@@ -71,6 +85,10 @@ public class FirebaseAuthCommandHandler : IRequestHandler<FirebaseAuthCommand, R
 
         // Create new user
         var isGoogle = firebaseUser.Provider == "google.com";
+        var newRefreshToken = _jwtService.GenerateRefreshToken();
+        var newRefreshExpireDays = _jwtService.GetRefreshTokenExpireDays();
+        var newAccessExpireMinutes = _jwtService.GetAccessTokenExpireMinutes();
+
         user = new User
         {
             Email = firebaseUser.Email.ToLower(),
@@ -84,7 +102,9 @@ public class FirebaseAuthCommandHandler : IRequestHandler<FirebaseAuthCommand, R
             EmailVerified = firebaseUser.EmailVerified,
             CreatedAt = _dateTime.UtcNow,
             UpdatedAt = _dateTime.UtcNow,
-            LastLogin = _dateTime.UtcNow
+            LastLogin = _dateTime.UtcNow,
+            RefreshTokenHash = _jwtService.HashRefreshToken(newRefreshToken),
+            RefreshTokenExpiresAt = _dateTime.UtcNow.AddDays(newRefreshExpireDays)
         };
 
         _context.Users.Add(user);
@@ -99,7 +119,13 @@ public class FirebaseAuthCommandHandler : IRequestHandler<FirebaseAuthCommand, R
 
         await _context.SaveChangesAsync(cancellationToken);
 
-        var newToken = _jwtService.GenerateAccessToken(user);
-        return Result<TokenDto>.Success(new TokenDto(newToken, "bearer", user.Id));
+        var newAccessToken = _jwtService.GenerateAccessToken(user);
+        return Result<TokenDto>.Success(new TokenDto(
+            newAccessToken,
+            newRefreshToken,
+            "bearer",
+            user.Id,
+            _dateTime.UtcNow.AddMinutes(newAccessExpireMinutes),
+            user.RefreshTokenExpiresAt!.Value));
     }
 }

@@ -29,6 +29,10 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(u => u.Bio).HasMaxLength(500);
         builder.Property(u => u.GooglePlayPurchaseToken).HasMaxLength(500);
 
+        // Refresh Token
+        builder.Property(u => u.RefreshTokenHash).HasMaxLength(255);
+        builder.Property(u => u.RefreshTokenExpiresAt);
+
         // Enum conversions stored as strings
         builder.Property(u => u.AuthProvider).HasConversion<string>().HasMaxLength(50);
         builder.Property(u => u.SubscriptionTier).HasConversion<string>().HasMaxLength(50);
