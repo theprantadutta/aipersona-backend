@@ -75,8 +75,7 @@ public class SendMessageCommandHandler : IRequestHandler<SendMessageCommand, Res
             var isBadGreeting = existingGreeting != null &&
                 (existingGreeting.GreetingText.Contains("I apologize") ||
                  existingGreeting.GreetingText.Contains("trouble connecting") ||
-                 existingGreeting.GreetingText.Contains("try again") ||
-                 existingGreeting.TokensUsed == 0);
+                 existingGreeting.GreetingText.Contains("try again"));
 
             if (isBadGreeting)
             {
