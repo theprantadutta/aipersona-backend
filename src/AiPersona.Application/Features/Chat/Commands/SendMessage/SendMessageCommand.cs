@@ -26,18 +26,18 @@ public class SendMessageCommandHandler : IRequestHandler<SendMessageCommand, Res
 {
     private readonly IApplicationDbContext _context;
     private readonly ICurrentUserService _currentUser;
-    private readonly IGeminiService _geminiService;
+    private readonly IAiService _aiService;
     private readonly IDateTimeService _dateTime;
 
     public SendMessageCommandHandler(
         IApplicationDbContext context,
         ICurrentUserService currentUser,
-        IGeminiService geminiService,
+        IAiService aiService,
         IDateTimeService dateTime)
     {
         _context = context;
         _currentUser = currentUser;
-        _geminiService = geminiService;
+        _aiService = aiService;
         _dateTime = dateTime;
     }
 
@@ -71,6 +71,20 @@ public class SendMessageCommandHandler : IRequestHandler<SendMessageCommand, Res
             var existingGreeting = await _context.PersonaGreetings
                 .FirstOrDefaultAsync(pg => pg.UserId == _currentUser.UserId && pg.PersonaId == session.Persona.Id, cancellationToken);
 
+            // Check if the cached greeting is a fallback/error message (corrupted data)
+            var isBadGreeting = existingGreeting != null &&
+                (existingGreeting.GreetingText.Contains("I apologize") ||
+                 existingGreeting.GreetingText.Contains("trouble connecting") ||
+                 existingGreeting.GreetingText.Contains("try again") ||
+                 existingGreeting.TokensUsed == 0);
+
+            if (isBadGreeting)
+            {
+                // Remove the bad cached greeting
+                _context.PersonaGreetings.Remove(existingGreeting!);
+                existingGreeting = null;
+            }
+
             if (existingGreeting != null)
             {
                 // Use the stored greeting - no AI call needed
@@ -81,7 +95,7 @@ public class SendMessageCommandHandler : IRequestHandler<SendMessageCommand, Res
             {
                 // Generate a new greeting via AI
                 var greetingPrompt = "Please introduce yourself in character. Give a brief, engaging greeting that shows your personality.";
-                var response = await _geminiService.GenerateResponseAsync(
+                var response = await _aiService.GenerateResponseAsync(
                     session.Persona, new List<ChatMessage>(), greetingPrompt, cancellationToken);
 
                 responseText = response.Text;
@@ -113,7 +127,7 @@ public class SendMessageCommandHandler : IRequestHandler<SendMessageCommand, Res
                 .Take(20)
                 .ToListAsync(cancellationToken);
 
-            var response = await _geminiService.GenerateResponseAsync(
+            var response = await _aiService.GenerateResponseAsync(
                 session.Persona, history, request.Message, cancellationToken);
 
             responseText = response.Text;

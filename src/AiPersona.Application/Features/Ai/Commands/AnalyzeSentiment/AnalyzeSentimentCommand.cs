@@ -11,14 +11,14 @@ public record AnalyzeSentimentCommand(string Text) : IRequest<Result<SentimentAn
 public class AnalyzeSentimentCommandHandler : IRequestHandler<AnalyzeSentimentCommand, Result<SentimentAnalysisDto>>
 {
     private readonly ICurrentUserService _currentUser;
-    private readonly IGeminiService _geminiService;
+    private readonly IAiService _aiService;
 
     public AnalyzeSentimentCommandHandler(
         ICurrentUserService currentUser,
-        IGeminiService geminiService)
+        IAiService aiService)
     {
         _currentUser = currentUser;
-        _geminiService = geminiService;
+        _aiService = aiService;
     }
 
     public async Task<Result<SentimentAnalysisDto>> Handle(AnalyzeSentimentCommand request, CancellationToken cancellationToken)
@@ -42,7 +42,7 @@ public class AnalyzeSentimentCommandHandler : IRequestHandler<AnalyzeSentimentCo
 
 Text to analyze: " + request.Text;
 
-        var result = await _geminiService.GenerateResponseAsync(
+        var result = await _aiService.GenerateResponseAsync(
             sentimentPersona,
             new List<ChatMessage>(),
             prompt,

@@ -17,16 +17,16 @@ public class GenerateResponseCommandHandler : IRequestHandler<GenerateResponseCo
 {
     private readonly IApplicationDbContext _context;
     private readonly ICurrentUserService _currentUser;
-    private readonly IGeminiService _geminiService;
+    private readonly IAiService _aiService;
 
     public GenerateResponseCommandHandler(
         IApplicationDbContext context,
         ICurrentUserService currentUser,
-        IGeminiService geminiService)
+        IAiService aiService)
     {
         _context = context;
         _currentUser = currentUser;
-        _geminiService = geminiService;
+        _aiService = aiService;
     }
 
     public async Task<Result<AiResponseDto>> Handle(GenerateResponseCommand request, CancellationToken cancellationToken)
@@ -59,7 +59,7 @@ public class GenerateResponseCommandHandler : IRequestHandler<GenerateResponseCo
         }
 
         var stopwatch = Stopwatch.StartNew();
-        var result = await _geminiService.GenerateResponseAsync(
+        var result = await _aiService.GenerateResponseAsync(
             persona,
             history,
             request.Message,
@@ -69,7 +69,7 @@ public class GenerateResponseCommandHandler : IRequestHandler<GenerateResponseCo
         return Result<AiResponseDto>.Success(new AiResponseDto(
             result.Text,
             result.TokensUsed,
-            "gemini",
+            "freeway",
             stopwatch.Elapsed.TotalMilliseconds));
     }
 }

@@ -52,7 +52,7 @@ public static class DependencyInjection
         services.AddHangfireServer();
 
         // HTTP client for external APIs
-        services.AddHttpClient<IGeminiService, GeminiService>();
+        services.AddHttpClient<IAiService, AiService>();
         services.AddHttpClient<IFileService, FileService>();
 
         // Firebase services

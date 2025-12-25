@@ -46,3 +46,6 @@ logs/
 # Windows reserved names
 nul
 NUL
+
+# Claude Code
+.claude/
