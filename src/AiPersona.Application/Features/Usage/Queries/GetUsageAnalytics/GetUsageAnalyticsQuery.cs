@@ -75,15 +75,58 @@ public class GetUsageAnalyticsQueryHandler : IRequestHandler<GetUsageAnalyticsQu
             .OrderBy(d => d.Date)
             .ToList();
 
+        // Calculate peak usage count (max messages in a single day)
+        var peakUsageCount = dailyUsage.Count > 0 ? dailyUsage.Max(d => d.Messages) : 0;
+
+        // Calculate trend based on recent vs older activity
+        var trend = CalculateTrend(dailyUsage);
+
+        // Calculate usage percentage (for free tier message limits)
+        var user = await _context.Users
+            .AsNoTracking()
+            .FirstOrDefaultAsync(u => u.Id == _currentUser.UserId, cancellationToken);
+
+        double? usagePercentage = null;
+        if (user?.SubscriptionTier == Domain.Enums.SubscriptionTier.Free)
+        {
+            var today = _dateTime.UtcNow.Date;
+            var todayMessages = recentMessages.Count(m => m.CreatedAt.Date == today);
+            usagePercentage = (todayMessages / 50.0) * 100.0; // 50 is free tier limit
+        }
+
         return Result<UsageAnalyticsDto>.Success(new UsageAnalyticsDto(
             totalMessages,
             totalTokens,
             totalSessions,
-            avgMessagesPerDay,
+            avgMessagesPerDay,         // DailyAverage
             avgTokensPerMessage,
             mostActiveHour,
-            mostActiveDayOfWeek,
+            mostActiveDayOfWeek,       // PeakUsageDay
+            peakUsageCount,            // NEW
+            trend,                     // NEW
+            usagePercentage,           // NEW
             messagesByPersona,
-            dailyUsage));
+            dailyUsage,                // DailyUsage (renamed from Last30Days)
+            null));                    // Predictions (placeholder)
+    }
+
+    private static string CalculateTrend(List<DailyUsageDto> dailyUsage)
+    {
+        if (dailyUsage.Count < 7) return "stable";
+
+        var recentWeek = dailyUsage.TakeLast(7).Average(d => d.Messages);
+        var previousWeek = dailyUsage.SkipLast(7).TakeLast(7).ToList();
+
+        if (previousWeek.Count == 0) return "stable";
+
+        var previousAvg = previousWeek.Average(d => d.Messages);
+
+        if (previousAvg == 0) return recentWeek > 0 ? "increasing" : "stable";
+
+        var changePercent = ((recentWeek - previousAvg) / previousAvg) * 100;
+
+        if (changePercent > 10) return "increasing";
+        if (changePercent < -10) return "decreasing";
+        return "stable";
     }
 }

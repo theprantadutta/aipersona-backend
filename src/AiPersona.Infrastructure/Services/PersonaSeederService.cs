@@ -27,13 +27,21 @@ public record PersonaSeederResult(
     List<string> Errors);
 
 public record PersonaData(
+    [property: System.Text.Json.Serialization.JsonPropertyName("name")]
     string Name,
+    [property: System.Text.Json.Serialization.JsonPropertyName("bio")]
     string Bio,
+    [property: System.Text.Json.Serialization.JsonPropertyName("description")]
     string Description,
+    [property: System.Text.Json.Serialization.JsonPropertyName("personality_traits")]
     List<string> PersonalityTraits,
+    [property: System.Text.Json.Serialization.JsonPropertyName("language_style")]
     string LanguageStyle,
+    [property: System.Text.Json.Serialization.JsonPropertyName("expertise")]
     List<string> Expertise,
+    [property: System.Text.Json.Serialization.JsonPropertyName("tags")]
     List<string> Tags,
+    [property: System.Text.Json.Serialization.JsonPropertyName("wikipedia_search")]
     string? WikipediaSearch);
 
 public class PersonaSeederService : IPersonaSeederService
@@ -45,17 +53,15 @@ public class PersonaSeederService : IPersonaSeederService
     private readonly ILogger<PersonaSeederService> _logger;
     private readonly IConfiguration _configuration;
 
-    // API Configuration
-    private readonly string _geminiApiKey;
-    private readonly string _geminiModel;
+    // API Configuration (Freeway only - no Gemini for seeding)
     private readonly string? _freewayApiUrl;
     private readonly string? _freewayApiKey;
     private readonly string _adminEmail;
     private readonly string _adminPassword;
 
     // Rate limiting
-    private const int RequestDelaySeconds = 5;
-    private static readonly int[] RetryDelays = [60, 180, 300]; // 1min, 3min, 5min
+    private const int FreewayCallDelayMs = 2000; // 2 second delay after each Freeway call
+    private static readonly int[] RetryDelays = [60, 180, 300]; // 1min, 3min, 5min for rate limits
     private static readonly int[] RateLimitStatusCodes = [429, 503, 500];
 
     public PersonaSeederService(
@@ -73,15 +79,7 @@ public class PersonaSeederService : IPersonaSeederService
         _configuration = configuration;
         _logger = logger;
 
-        _geminiApiKey = !string.IsNullOrEmpty(configuration["Gemini:ApiKey"])
-            ? configuration["Gemini:ApiKey"]!
-            : Environment.GetEnvironmentVariable("GEMINI_API_KEY")
-              ?? throw new InvalidOperationException("Gemini API key is not configured");
-
-        _geminiModel = !string.IsNullOrEmpty(configuration["Gemini:Model"])
-            ? configuration["Gemini:Model"]!
-            : Environment.GetEnvironmentVariable("GEMINI_MODEL") ?? "gemini-2.5-flash";
-
+        // Freeway API configuration (used for Wikipedia URL lookup)
         _freewayApiUrl = !string.IsNullOrEmpty(configuration["Freeway:ApiUrl"])
             ? configuration["Freeway:ApiUrl"]
             : Environment.GetEnvironmentVariable("FREEWAY_API_URL");
@@ -123,23 +121,78 @@ public class PersonaSeederService : IPersonaSeederService
 
             try
             {
-                // Process image
-                var imageUrl = await ProcessPersonaImageAsync(persona, cancellationToken);
-                if (imageUrl != null) imagesFound++;
+                // First check if persona already exists
+                var existing = await _context.Personas
+                    .FirstOrDefaultAsync(p => p.Name == persona.Name && p.CreatorId == adminUser.Id, cancellationToken);
 
-                // Seed or update persona
-                var (wasCreated, wasUpdated) = await SeedOrUpdatePersonaAsync(adminUser, persona, imageUrl, cancellationToken);
-
-                if (wasCreated) created++;
-                else if (wasUpdated) updated++;
-                else skipped++;
-
-                // Rate limiting delay between personas
-                if (i < personasData.Count - 1)
+                if (existing != null)
                 {
-                    _logger.LogDebug("Waiting {Seconds}s before next persona...", RequestDelaySeconds);
-                    await Task.Delay(TimeSpan.FromSeconds(RequestDelaySeconds), cancellationToken);
+                    bool needsUpdate = false;
+                    bool needsImage = string.IsNullOrEmpty(existing.ImagePath);
+                    bool needsTraits = existing.PersonalityTraits == null || existing.PersonalityTraits.Count == 0;
+                    bool needsExpertise = existing.Expertise == null || existing.Expertise.Count == 0;
+
+                    // Check if persona is complete (has image AND traits AND expertise)
+                    if (!needsImage && !needsTraits && !needsExpertise)
+                    {
+                        _logger.LogDebug("  [SKIP] Persona already complete: {Name}", persona.Name);
+                        skipped++;
+                        continue;
+                    }
+
+                    // Update traits/expertise if missing
+                    if (needsTraits && persona.PersonalityTraits?.Count > 0)
+                    {
+                        existing.PersonalityTraits = persona.PersonalityTraits;
+                        needsUpdate = true;
+                        _logger.LogInformation("  [FIX] Adding personality traits to: {Name}", persona.Name);
+                    }
+
+                    if (needsExpertise && persona.Expertise?.Count > 0)
+                    {
+                        existing.Expertise = persona.Expertise;
+                        needsUpdate = true;
+                        _logger.LogInformation("  [FIX] Adding expertise to: {Name}", persona.Name);
+                    }
+
+                    // Fetch image if missing
+                    if (needsImage)
+                    {
+                        _logger.LogInformation("  [IMAGE] Fetching missing image for: {Name}", persona.Name);
+                        var imageUrl = await ProcessPersonaImageAsync(persona, cancellationToken);
+
+                        if (!string.IsNullOrEmpty(imageUrl))
+                        {
+                            existing.ImagePath = imageUrl;
+                            needsUpdate = true;
+                            imagesFound++;
+                        }
+                    }
+
+                    if (needsUpdate)
+                    {
+                        existing.UpdatedAt = DateTime.UtcNow;
+                        await _context.SaveChangesAsync(cancellationToken);
+                        _logger.LogInformation("  [UPDATE] Updated existing persona: {Name}", persona.Name);
+                        updated++;
+                    }
+                    else
+                    {
+                        _logger.LogDebug("  [SKIP] No updates needed for: {Name}", persona.Name);
+                        skipped++;
+                    }
                 }
+                else
+                {
+                    // Persona doesn't exist - create new with image
+                    var imageUrl = await ProcessPersonaImageAsync(persona, cancellationToken);
+                    if (imageUrl != null) imagesFound++;
+
+                    await CreatePersonaAsync(adminUser, persona, imageUrl, cancellationToken);
+                    _logger.LogInformation("  [CREATE] Created new persona: {Name}", persona.Name);
+                    created++;
+                }
+
             }
             catch (Exception ex)
             {
@@ -156,8 +209,8 @@ public class PersonaSeederService : IPersonaSeederService
         _logger.LogInformation("   Total personas processed: {Count}", personasData.Count);
         _logger.LogInformation("   Images successfully fetched: {Count}", imagesFound);
         _logger.LogInformation("   New personas created: {Count}", created);
-        _logger.LogInformation("   Existing personas updated: {Count}", updated);
-        _logger.LogInformation("   Personas skipped (unchanged): {Count}", skipped);
+        _logger.LogInformation("   Existing personas updated (image only): {Count}", updated);
+        _logger.LogInformation("   Personas skipped (already complete): {Count}", skipped);
         _logger.LogInformation("   Total personas in database: {Count}", totalPersonas);
         _logger.LogInformation("   Admin user: {Email}", adminUser.Email);
         _logger.LogInformation("======================================================================");
@@ -316,16 +369,12 @@ public class PersonaSeederService : IPersonaSeederService
     {
         _logger.LogDebug("  [WIKI] Searching Wikipedia URL for: {Name}", personaName);
 
-        var prompt = $"""
-            You are a helpful research assistant. Your task is to find the official English Wikipedia page URL
-            for a given person or character. If you find a direct and exact match, respond ONLY with the full URL
-            (e.g., https://en.wikipedia.org/wiki/...). Do not include any other text, explanation, or formatting.
-            Just the URL. If you are not certain or no page exists, respond with the single word: null
-
-            Find the Wikipedia URL for: '{personaName}'
-            Description: {personaBio}
-            Additional context: {searchHint}
-            """;
+        // Check Freeway API configuration
+        if (string.IsNullOrEmpty(_freewayApiUrl) || string.IsNullOrEmpty(_freewayApiKey))
+        {
+            _logger.LogWarning("  [WARN] Freeway API not configured - cannot fetch Wikipedia URLs");
+            return null;
+        }
 
         var messages = new[]
         {
@@ -335,72 +384,39 @@ public class PersonaSeederService : IPersonaSeederService
 
         int attempt = 0;
         int maxAttempts = RetryDelays.Length + 1;
-        bool useFreeway = false;
         string? potentialUrl = null;
 
         while (attempt < maxAttempts)
         {
             try
             {
-                if (!useFreeway)
+                _logger.LogDebug("  [API] Calling Freeway API (attempt {Attempt}/{Max})", attempt + 1, maxAttempts);
+                var (success, url, shouldRetry) = await CallFreewayForUrlAsync(messages, cancellationToken);
+
+                // Add delay after Freeway call
+                _logger.LogDebug("  [DELAY] Waiting {Ms}ms after Freeway call...", FreewayCallDelayMs);
+                await Task.Delay(FreewayCallDelayMs, cancellationToken);
+
+                if (success)
                 {
-                    _logger.LogDebug("  [API] Attempting with Gemini ({Model})", _geminiModel);
-                    var (success, url, shouldRetry) = await CallGeminiForUrlAsync(prompt, cancellationToken);
+                    potentialUrl = url;
+                    break;
+                }
 
-                    if (success)
-                    {
-                        potentialUrl = url;
-                        break;
-                    }
-
-                    if (shouldRetry)
-                    {
-                        _logger.LogDebug("  [RATE LIMIT] Gemini rate limited. Trying Freeway...");
-                        useFreeway = true;
-                        continue;
-                    }
-
-                    useFreeway = true;
+                if (shouldRetry && attempt < RetryDelays.Length)
+                {
+                    var waitTime = RetryDelays[attempt];
+                    _logger.LogDebug("  [RATE LIMIT] Waiting {Time}s before retry...", waitTime);
+                    await Task.Delay(TimeSpan.FromSeconds(waitTime), cancellationToken);
+                    attempt++;
                     continue;
                 }
-                else
-                {
-                    if (string.IsNullOrEmpty(_freewayApiUrl) || string.IsNullOrEmpty(_freewayApiKey))
-                    {
-                        _logger.LogWarning("  [WARN] Freeway API not configured");
-                        return null;
-                    }
 
-                    _logger.LogDebug("  [API] Attempting with Freeway (paid)");
-                    var (success, url, shouldRetry) = await CallFreewayForUrlAsync(messages, cancellationToken);
-
-                    if (success)
-                    {
-                        potentialUrl = url;
-                        break;
-                    }
-
-                    if (shouldRetry && attempt < RetryDelays.Length)
-                    {
-                        var waitTime = RetryDelays[attempt];
-                        _logger.LogDebug("  [RATE LIMIT] Waiting {Time}s before retry...", waitTime);
-                        await Task.Delay(TimeSpan.FromSeconds(waitTime), cancellationToken);
-                        attempt++;
-                        useFreeway = false;
-                        continue;
-                    }
-
-                    return null;
-                }
+                return null;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "  [ERROR] API error");
-                if (!useFreeway)
-                {
-                    useFreeway = true;
-                    continue;
-                }
+                _logger.LogError(ex, "  [ERROR] Freeway API error");
                 return null;
             }
         }
@@ -433,43 +449,6 @@ public class PersonaSeederService : IPersonaSeederService
 
         _logger.LogDebug("  [OK] Got Wikipedia URL: {Url}", potentialUrl);
         return potentialUrl;
-    }
-
-    private async Task<(bool Success, string? Url, bool ShouldRetry)> CallGeminiForUrlAsync(
-        string prompt,
-        CancellationToken cancellationToken)
-    {
-        var url = $"https://generativelanguage.googleapis.com/v1beta/models/{_geminiModel}:generateContent?key={_geminiApiKey}";
-
-        var requestBody = new
-        {
-            contents = new[] { new { parts = new[] { new { text = prompt } } } },
-            generationConfig = new { temperature = 0.1, maxOutputTokens = 256 }
-        };
-
-        var response = await _httpClient.PostAsJsonAsync(url, requestBody, cancellationToken);
-
-        if (RateLimitStatusCodes.Contains((int)response.StatusCode))
-        {
-            return (false, null, true);
-        }
-
-        if (!response.IsSuccessStatusCode)
-        {
-            return (false, null, false);
-        }
-
-        using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
-
-        var text = doc.RootElement
-            .GetProperty("candidates")[0]
-            .GetProperty("content")
-            .GetProperty("parts")[0]
-            .GetProperty("text")
-            .GetString()?.Trim();
-
-        _logger.LogDebug("  [OK] Response received from Gemini");
-        return (true, text, false);
     }
 
     private async Task<(bool Success, string? Url, bool ShouldRetry)> CallFreewayForUrlAsync(
@@ -602,108 +581,39 @@ public class PersonaSeederService : IPersonaSeederService
         }
     }
 
-    private async Task<(bool Created, bool Updated)> SeedOrUpdatePersonaAsync(
+    /// <summary>
+    /// Creates a new persona in the database.
+    /// </summary>
+    private async Task CreatePersonaAsync(
         User user,
         PersonaData personaData,
         string? imageUrl,
         CancellationToken cancellationToken)
     {
-        var existing = await _context.Personas
-            .FirstOrDefaultAsync(p => p.Name == personaData.Name && p.CreatorId == user.Id, cancellationToken);
-
-        if (existing != null)
+        var random = new Random();
+        var persona = new Persona
         {
-            bool updated = false;
+            CreatorId = user.Id,
+            Name = personaData.Name,
+            Description = personaData.Description,
+            Bio = personaData.Bio,
+            ImagePath = imageUrl,
+            PersonalityTraits = personaData.PersonalityTraits,
+            LanguageStyle = personaData.LanguageStyle,
+            Expertise = personaData.Expertise,
+            Tags = personaData.Tags,
+            IsPublic = true,
+            IsMarketplace = false,
+            Status = PersonaStatus.Active,
+            ConversationCount = random.Next(500, 5001),
+            CloneCount = random.Next(50, 501),
+            LikeCount = random.Next(1000, 10001),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
 
-            // Update image if we have a new one and it's different
-            if (!string.IsNullOrEmpty(imageUrl) && existing.ImagePath != imageUrl)
-            {
-                existing.ImagePath = imageUrl;
-                updated = true;
-            }
-
-            // Update other fields if they differ
-            if (existing.Bio != personaData.Bio)
-            {
-                existing.Bio = personaData.Bio;
-                updated = true;
-            }
-            if (existing.Description != personaData.Description)
-            {
-                existing.Description = personaData.Description;
-                updated = true;
-            }
-            if (!AreListsEqual(existing.PersonalityTraits, personaData.PersonalityTraits))
-            {
-                existing.PersonalityTraits = personaData.PersonalityTraits;
-                updated = true;
-            }
-            if (existing.LanguageStyle != personaData.LanguageStyle)
-            {
-                existing.LanguageStyle = personaData.LanguageStyle;
-                updated = true;
-            }
-            if (!AreListsEqual(existing.Expertise, personaData.Expertise))
-            {
-                existing.Expertise = personaData.Expertise;
-                updated = true;
-            }
-            if (!AreListsEqual(existing.Tags, personaData.Tags))
-            {
-                existing.Tags = personaData.Tags;
-                updated = true;
-            }
-
-            if (updated)
-            {
-                existing.UpdatedAt = DateTime.UtcNow;
-                await _context.SaveChangesAsync(cancellationToken);
-                _logger.LogInformation("  [UPDATE] Updated persona: {Name}", personaData.Name);
-                return (false, true);
-            }
-            else
-            {
-                _logger.LogDebug("  [SKIP] Persona unchanged: {Name}", personaData.Name);
-                return (false, false);
-            }
-        }
-        else
-        {
-            // Create new persona with random initial stats
-            var random = new Random();
-            var persona = new Persona
-            {
-                CreatorId = user.Id,
-                Name = personaData.Name,
-                Description = personaData.Description,
-                Bio = personaData.Bio,
-                ImagePath = imageUrl,
-                PersonalityTraits = personaData.PersonalityTraits,
-                LanguageStyle = personaData.LanguageStyle,
-                Expertise = personaData.Expertise,
-                Tags = personaData.Tags,
-                IsPublic = true,
-                IsMarketplace = false,
-                Status = PersonaStatus.Active,
-                ConversationCount = random.Next(500, 5001),
-                CloneCount = random.Next(50, 501),
-                LikeCount = random.Next(1000, 10001),
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-
-            _context.Personas.Add(persona);
-            await _context.SaveChangesAsync(cancellationToken);
-            _logger.LogInformation("  [CREATE] Created persona: {Name}", personaData.Name);
-            return (true, false);
-        }
-    }
-
-    private static bool AreListsEqual(List<string>? list1, List<string>? list2)
-    {
-        if (list1 == null && list2 == null) return true;
-        if (list1 == null || list2 == null) return false;
-        return list1.SequenceEqual(list2);
+        _context.Personas.Add(persona);
+        await _context.SaveChangesAsync(cancellationToken);
     }
 
     private static string SanitizeFilename(string name)

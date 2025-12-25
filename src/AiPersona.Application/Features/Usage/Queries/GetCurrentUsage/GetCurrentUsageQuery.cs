@@ -37,13 +37,21 @@ public class GetCurrentUsageQueryHandler : IRequestHandler<GetCurrentUsageQuery,
         if (user == null)
             return Result<CurrentUsageDto>.Failure("User not found", 404);
 
-        var usage = await _context.UsageTrackings
-            .FirstOrDefaultAsync(u => u.UserId == _currentUser.UserId, cancellationToken);
-
         var today = _dateTime.UtcNow.Date;
-        var messagesToday = usage?.MessagesToday ?? 0;
-        if (usage?.MessagesCountResetAt.Date != today)
-            messagesToday = 0;
+        var tomorrow = today.AddDays(1);
+
+        // Count ALL messages (user + AI) sent today, excluding system messages
+        var userSessionIds = await _context.ChatSessions
+            .Where(s => s.UserId == _currentUser.UserId)
+            .Select(s => s.Id)
+            .ToListAsync(cancellationToken);
+
+        var messagesToday = await _context.ChatMessages
+            .Where(m => userSessionIds.Contains(m.SessionId)
+                && m.MessageType != MessageType.System  // Exclude system/greeting messages
+                && m.CreatedAt >= today
+                && m.CreatedAt < tomorrow)
+            .CountAsync(cancellationToken);
 
         var personaCount = await _context.Personas
             .Where(p => p.CreatorId == _currentUser.UserId && p.Status != PersonaStatus.Archived)
@@ -56,28 +64,37 @@ public class GetCurrentUsageQueryHandler : IRequestHandler<GetCurrentUsageQuery,
         var (messageLimit, personaLimit, storageLimitMb, historyDays) = GetLimitsForTier(user.SubscriptionTier);
 
         var nextReset = today.AddDays(1);
+        var isPremium = user.SubscriptionTier != SubscriptionTier.Free;
+        var storageUsedMb = storageUsed / (1024.0 * 1024.0);
 
         return Result<CurrentUsageDto>.Success(new CurrentUsageDto(
             messagesToday,
             messageLimit,
-            personaCount,
+            personaCount,           // PersonasCount in DTO
             personaLimit,
             storageUsed,
+            storageUsedMb,          // NEW: StorageUsedMb
             storageLimitMb * 1024 * 1024,
             historyDays,
             historyDays,
             user.SubscriptionTier.ToString(),
+            isPremium,              // NEW: IsPremium
             nextReset));
     }
 
+    /// <summary>
+    /// Get subscription tier limits. Returns (messageLimit, personaLimit, storageMb, historyDays).
+    /// -1 means unlimited. MUST match SendMessageCommand.GetLimitsForTier() and GetPlansQuery.
+    /// </summary>
     private static (int messageLimit, int personaLimit, int storageMb, int historyDays) GetLimitsForTier(SubscriptionTier tier)
     {
         return tier switch
         {
-            SubscriptionTier.Pro => (-1, -1, 102400, -1),
-            SubscriptionTier.Premium => (-1, -1, 10240, -1),
-            SubscriptionTier.Basic => (500, 10, 1024, 30),
-            _ => (50, 3, 100, 7)
+            SubscriptionTier.Pro => (-1, -1, 102400, -1),      // Unlimited messages/personas, 100GB storage
+            SubscriptionTier.Premium => (-1, -1, 10240, -1),   // Unlimited messages/personas, 10GB storage
+            SubscriptionTier.Basic => (500, 10, 1024, 30),     // 500 messages/day, 10 personas, 1GB, 30 days
+            SubscriptionTier.Lifetime => (-1, -1, 102400, -1), // Same as Pro
+            _ => (50, 3, 100, 7)                               // Free: 50 messages/day, 3 personas, 100MB, 7 days
         };
     }
 }

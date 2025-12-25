@@ -87,20 +87,29 @@ public record ChatStatisticsDto(
     int TotalSessions,
     int TotalMessages,
     long TotalTokens,
-    List<PersonaChatStatsDto> PersonaStats,
+    int ActiveSessions,                          // NEW
+    int ArchivedSessions,                        // NEW
+    int PinnedSessions,                          // NEW
+    int UniquePersonas,                          // NEW
+    PersonaChatStatsDto? MostActivePersona,      // NEW
+    List<PersonaChatStatsDto> PersonasActivity,  // renamed from PersonaStats
+    List<DailyActivityDto> WeeklyActivity,       // renamed from DailyActivity
+    double AvgMessagesPerSession,                // NEW
+    string? MostActiveDay,                       // NEW
     int MessagesLast7Days,
-    int MessagesLast30Days,
-    List<DailyActivityDto> DailyActivity);
+    int MessagesLast30Days);
 
 public record PersonaChatStatsDto(
     Guid PersonaId,
     string PersonaName,
+    string? PersonaImageUrl,  // NEW
     int SessionCount,
     int MessageCount);
 
 public record DailyActivityDto(
     DateTime Date,
-    int MessageCount);
+    int SessionsCreated,  // NEW
+    int MessagesSent);    // renamed from MessageCount
 
 public record ExportResultDto(
     string Format,

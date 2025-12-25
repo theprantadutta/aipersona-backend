@@ -2,14 +2,16 @@ namespace AiPersona.Application.Features.Usage.DTOs;
 
 public record CurrentUsageDto(
     int MessagesToday,
-    int MessagesLimit,  // Changed from MessageLimit to match Flutter
-    int PersonaCount,
-    int PersonasLimit,  // Changed from PersonaLimit to match Flutter
+    int MessagesLimit,
+    int PersonasCount,        // Changed from PersonaCount to match Flutter
+    int PersonasLimit,
     long StorageUsedBytes,
+    double StorageUsedMb,     // NEW - for Flutter compatibility
     long StorageLimitBytes,
     int ConversationHistoryDays,
     int HistoryDaysLimit,
     string Tier,
+    bool IsPremium,           // NEW - derived from tier
     DateTime? ResetAt);
 
 public record UsageHistoryItemDto(
@@ -29,12 +31,16 @@ public record UsageAnalyticsDto(
     int TotalMessages,
     int TotalTokens,
     int TotalSessions,
-    double AvgMessagesPerDay,
+    double DailyAverage,          // renamed from AvgMessagesPerDay
     double AvgTokensPerMessage,
     int MostActiveHour,
-    string MostActiveDayOfWeek,
+    string PeakUsageDay,          // renamed from MostActiveDayOfWeek
+    int PeakUsageCount,           // NEW - max messages in a single day
+    string Trend,                 // NEW - "increasing", "decreasing", "stable"
+    double? UsagePercentage,      // NEW
     Dictionary<string, int> MessagesByPersona,
-    List<DailyUsageDto> Last30Days);
+    List<DailyUsageDto> DailyUsage,  // renamed from Last30Days
+    Dictionary<string, object>? Predictions);  // NEW
 
 public record DailyUsageDto(
     DateTime Date,

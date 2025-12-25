@@ -28,6 +28,7 @@ public class GetStatisticsQueryHandler : IRequestHandler<GetStatisticsQuery, Res
         var userId = _currentUser.UserId.Value;
 
         var sessions = await _context.ChatSessions
+            .Include(s => s.Persona)
             .Where(s => s.UserId == userId && s.Status != ChatSessionStatus.Deleted)
             .AsNoTracking()
             .ToListAsync(cancellationToken);
@@ -42,16 +43,30 @@ public class GetStatisticsQueryHandler : IRequestHandler<GetStatisticsQuery, Res
             .Where(m => sessionIds.Contains(m.SessionId))
             .SumAsync(m => m.TokensUsed, cancellationToken);
 
-        var personaStats = sessions
+        // Session counts by status
+        var activeSessions = sessions.Count(s => s.Status == ChatSessionStatus.Active);
+        var archivedSessions = sessions.Count(s => s.Status == ChatSessionStatus.Archived);
+        var pinnedSessions = sessions.Count(s => s.IsPinned);
+        var uniquePersonas = sessions.Where(s => s.PersonaId.HasValue).Select(s => s.PersonaId).Distinct().Count();
+
+        // Persona stats with image URL
+        var personasActivity = sessions
             .Where(s => s.PersonaId.HasValue)
-            .GroupBy(s => new { PersonaId = s.PersonaId!.Value, s.PersonaName })
+            .GroupBy(s => new { PersonaId = s.PersonaId!.Value, s.PersonaName, ImageUrl = s.Persona?.ImagePath })
             .Select(g => new PersonaChatStatsDto(
                 g.Key.PersonaId,
                 g.Key.PersonaName,
+                g.Key.ImageUrl,
                 g.Count(),
                 g.Sum(s => s.MessageCount)))
             .OrderByDescending(p => p.MessageCount)
             .ToList();
+
+        // Most active persona
+        var mostActivePersona = personasActivity.FirstOrDefault();
+
+        // Average messages per session
+        var avgMessagesPerSession = sessions.Count > 0 ? (double)totalMessages / sessions.Count : 0;
 
         var today = DateTime.UtcNow.Date;
         var last7Days = today.AddDays(-7);
@@ -65,20 +80,48 @@ public class GetStatisticsQueryHandler : IRequestHandler<GetStatisticsQuery, Res
             .Where(m => sessionIds.Contains(m.SessionId) && m.CreatedAt >= last30Days)
             .CountAsync(cancellationToken);
 
-        var dailyActivity = await _context.ChatMessages
-            .Where(m => sessionIds.Contains(m.SessionId) && m.CreatedAt >= last30Days)
-            .GroupBy(m => m.CreatedAt.Date)
-            .Select(g => new DailyActivityDto(g.Key, g.Count()))
-            .OrderBy(d => d.Date)
+        // Fetch messages and sessions created dates for daily activity
+        var messagesDates = await _context.ChatMessages
+            .Where(m => sessionIds.Contains(m.SessionId) && m.CreatedAt >= last7Days)
+            .Select(m => m.CreatedAt)
             .ToListAsync(cancellationToken);
+
+        var sessionsCreatedDates = sessions
+            .Where(s => s.CreatedAt >= last7Days)
+            .Select(s => s.CreatedAt.Date)
+            .ToList();
+
+        // Group by date with sessions created count
+        var weeklyActivity = messagesDates
+            .GroupBy(d => d.Date)
+            .Select(g => new DailyActivityDto(
+                g.Key,
+                sessionsCreatedDates.Count(d => d == g.Key),
+                g.Count()))
+            .OrderBy(d => d.Date)
+            .ToList();
+
+        // Most active day of week
+        var mostActiveDay = messagesDates.Count > 0
+            ? messagesDates.GroupBy(d => d.DayOfWeek)
+                .OrderByDescending(g => g.Count())
+                .First().Key.ToString()
+            : null;
 
         return Result<ChatStatisticsDto>.Success(new ChatStatisticsDto(
             sessions.Count,
             totalMessages,
             totalTokens,
-            personaStats,
+            activeSessions,
+            archivedSessions,
+            pinnedSessions,
+            uniquePersonas,
+            mostActivePersona,
+            personasActivity,
+            weeklyActivity,
+            avgMessagesPerSession,
+            mostActiveDay,
             messagesLast7Days,
-            messagesLast30Days,
-            dailyActivity));
+            messagesLast30Days));
     }
 }
