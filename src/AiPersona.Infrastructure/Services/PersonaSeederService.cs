@@ -457,7 +457,7 @@ public class PersonaSeederService : IPersonaSeederService
     {
         var requestBody = new
         {
-            model = "paid",
+            model = "free",
             messages,
             temperature = 0.1,
             max_tokens = 256
