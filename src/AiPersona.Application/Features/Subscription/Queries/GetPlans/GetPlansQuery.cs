@@ -20,8 +20,8 @@ public class GetPlansQueryHandler : IRequestHandler<GetPlansQuery, Result<Subscr
                 0,
                 null,
                 "USD",
-                new List<string> { "50 messages per day", "3 custom personas", "7-day chat history", "100MB storage", "Basic chat features" },
-                50, 3, 100, 7),
+                new List<string> { "20 messages per day", "3 custom personas", "7-day chat history", "100MB storage", "Basic chat features" },
+                20, 3, 100, 7),
             new SubscriptionPlanDto(
                 "basic_monthly",
                 "Basic",
@@ -29,8 +29,8 @@ public class GetPlansQueryHandler : IRequestHandler<GetPlansQuery, Result<Subscr
                 4.99m,
                 49.99m,
                 "USD",
-                new List<string> { "500 messages per day", "10 custom personas", "30-day chat history", "1GB storage", "Voice features", "PDF export" },
-                500, 10, 1024, 30),
+                new List<string> { "200 messages per day", "10 custom personas", "30-day chat history", "1GB storage", "Voice features", "PDF export" },
+                200, 10, 1024, 30),
             new SubscriptionPlanDto(
                 "premium_monthly",
                 "Premium",
@@ -38,8 +38,8 @@ public class GetPlansQueryHandler : IRequestHandler<GetPlansQuery, Result<Subscr
                 9.99m,
                 99.99m,
                 "USD",
-                new List<string> { "Unlimited messages", "Unlimited personas", "Unlimited chat history", "10GB storage", "All voice features", "Full analytics", "Priority support" },
-                -1, -1, 10240, -1),
+                new List<string> { "500 messages per day", "Unlimited personas", "Unlimited chat history", "10GB storage", "All voice features", "Full analytics", "Priority support" },
+                500, -1, 10240, -1),
             new SubscriptionPlanDto(
                 "pro_monthly",
                 "Pro",

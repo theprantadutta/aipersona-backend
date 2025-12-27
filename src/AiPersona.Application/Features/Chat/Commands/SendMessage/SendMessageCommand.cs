@@ -310,10 +310,10 @@ public class SendMessageCommandHandler : IRequestHandler<SendMessageCommand, Res
         return tier switch
         {
             SubscriptionTier.Pro => (-1, -1, 102400, -1),      // Unlimited messages/personas, 100GB storage
-            SubscriptionTier.Premium => (-1, -1, 10240, -1),   // Unlimited messages/personas, 10GB storage
-            SubscriptionTier.Basic => (500, 10, 1024, 30),     // 500 messages/day, 10 personas, 1GB, 30 days
+            SubscriptionTier.Premium => (500, -1, 10240, -1),  // 500 messages/day, unlimited personas, 10GB storage
+            SubscriptionTier.Basic => (200, 10, 1024, 30),     // 200 messages/day, 10 personas, 1GB, 30 days
             SubscriptionTier.Lifetime => (-1, -1, 102400, -1), // Same as Pro
-            _ => (50, 3, 100, 7)                               // Free: 50 messages/day, 3 personas, 100MB, 7 days
+            _ => (20, 3, 100, 7)                               // Free: 20 messages/day, 3 personas, 100MB, 7 days
         };
     }
 }
