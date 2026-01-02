@@ -5,6 +5,14 @@
     <ProjectReference Include="..\AiPersona.Infrastructure\AiPersona.Infrastructure.csproj" />
   </ItemGroup>
 
+  <!-- Copy Firebase credentials to output -->
+  <ItemGroup>
+    <None Update="firebase-admin-sdk.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Asp.Versioning.Mvc" Version="8.1.0" />
     <PackageReference Include="Asp.Versioning.Mvc.ApiExplorer" Version="8.1.0" />
