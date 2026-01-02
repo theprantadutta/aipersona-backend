@@ -15,6 +15,7 @@ using AiPersona.Application.Common.Interfaces;
 using AiPersona.Infrastructure;
 
 // Load .env file if it exists (check multiple locations)
+// When running in Docker with env_file, environment variables are already set by Docker
 var possibleEnvPaths = new[]
 {
     Path.Combine(Directory.GetCurrentDirectory(), ".env"),
@@ -43,9 +44,21 @@ if (envFilePath != null)
 }
 else
 {
-    Console.WriteLine("[ENV] WARNING: No .env file found! Checked paths:");
-    foreach (var p in possibleEnvPaths)
-        Console.WriteLine($"  - {Path.GetFullPath(p)}");
+    // Only warn if critical environment variables are not already set
+    // (e.g., when running in Docker, env vars are injected via env_file in compose.yaml)
+    var hasEnvVars = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("JWT_SECRET_KEY")) ||
+                     !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("DATABASE_URL"));
+
+    if (hasEnvVars)
+    {
+        Console.WriteLine("[ENV] Using environment variables (no .env file needed)");
+    }
+    else
+    {
+        Console.WriteLine("[ENV] WARNING: No .env file found! Checked paths:");
+        foreach (var p in possibleEnvPaths)
+            Console.WriteLine($"  - {Path.GetFullPath(p)}");
+    }
 }
 
 // Configure Serilog
