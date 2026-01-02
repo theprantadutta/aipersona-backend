@@ -77,6 +77,9 @@ public static class DependencyInjection
         // Persona seeder service
         services.AddScoped<IPersonaSeederService, PersonaSeederService>();
 
+        // Test user seeder service
+        services.AddScoped<ITestUserSeederService, TestUserSeederService>();
+
         return services;
     }
 

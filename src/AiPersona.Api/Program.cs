@@ -267,6 +267,39 @@ try
     var port = Environment.GetEnvironmentVariable("API_PORT") ?? "8001";
     app.Urls.Add($"http://0.0.0.0:{port}");
 
+    // Check for --seed-test-users CLI argument or SEED_TEST_USERS env var
+    var shouldSeedTestUsers = args.Contains("--seed-test-users") ||
+                               Environment.GetEnvironmentVariable("SEED_TEST_USERS") == "true";
+
+    if (shouldSeedTestUsers)
+    {
+        Log.Information("Running test user seeder...");
+        using var scope = app.Services.CreateScope();
+        var testUserSeeder = scope.ServiceProvider.GetRequiredService<AiPersona.Infrastructure.Services.ITestUserSeederService>();
+
+        try
+        {
+            var testResult = await testUserSeeder.SeedTestUsersAsync();
+            Log.Information("Test users seeded: Free={FreeEmail}, Premium={PremiumEmail}, Password={Password}",
+                testResult.FreeUserEmail, testResult.PremiumUserEmail, testResult.Password);
+
+            // Exit after seeding if only seeding was requested
+            if (args.Contains("--seed-only"))
+            {
+                Log.Information("Seed-only mode, exiting...");
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Failed to seed test users");
+            if (args.Contains("--seed-only"))
+            {
+                throw;
+            }
+        }
+    }
+
     // Check for --seed-personas CLI argument or SEED_PERSONAS env var
     var shouldSeedPersonas = args.Contains("--seed-personas") ||
                               Environment.GetEnvironmentVariable("SEED_PERSONAS") == "true";

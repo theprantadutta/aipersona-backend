@@ -3,6 +3,7 @@ services:
     build: .
     env_file:
       - .env
+      - src/AiPersona.Api/.env
     restart: unless-stopped
     volumes:
       - ./uploads:/app/uploads

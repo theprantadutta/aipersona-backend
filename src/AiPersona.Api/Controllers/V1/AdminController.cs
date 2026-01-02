@@ -130,4 +130,32 @@ public class AdminController : BaseApiController
             errors = result.Errors
         });
     }
+
+    /// <summary>
+    /// Seed test users (free and premium accounts)
+    /// Creates test accounts for development/testing purposes.
+    /// </summary>
+    [HttpPost("seed-test-users")]
+    public async Task<ActionResult> SeedTestUsers(
+        [FromServices] ITestUserSeederService seederService,
+        CancellationToken cancellationToken)
+    {
+        var result = await seederService.SeedTestUsersAsync(cancellationToken);
+        return Ok(new
+        {
+            message = "Test user seeding completed",
+            free_user = new
+            {
+                email = result.FreeUserEmail,
+                created = result.FreeUserCreated
+            },
+            premium_user = new
+            {
+                email = result.PremiumUserEmail,
+                created = result.PremiumUserCreated
+            },
+            password = result.Password,
+            details = result.Messages
+        });
+    }
 }
